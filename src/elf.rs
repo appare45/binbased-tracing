@@ -8,6 +8,14 @@ use goblin::{
 
 use crate::error::ElfError;
 
+pub struct Symbol(Sym);
+
+impl Symbol {
+    fn get_real_address(&self, base: u64) -> u64 {
+        base + self.0.st_value
+    }
+}
+
 pub type SymbolMap = HashMap<String, Sym>;
 
 pub struct ELF<'a> {

@@ -5,6 +5,7 @@ use clap::Parser;
 mod conf;
 mod elf;
 mod error;
+mod maps;
 mod proc;
 
 #[derive(Parser, Debug)]

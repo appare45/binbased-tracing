@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, num::ParseIntError};
 
 use thiserror::Error;
 
@@ -14,4 +14,19 @@ pub enum ProcError {
 pub enum ElfError {
     #[error("Not an Elf file")]
     NotAnElfFile,
+}
+
+#[derive(Error, Debug)]
+pub enum MapsError {
+    #[error("Failed to Read file")]
+    ReadFailed(#[from] io::Error),
+
+    #[error("Failed to parse int")]
+    FailedToParse(#[from] ParseIntError),
+
+    #[error("Parse error")]
+    ParseError,
+
+    #[error("Not found")]
+    NotFound,
 }
