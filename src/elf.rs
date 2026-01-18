@@ -18,17 +18,15 @@ impl Symbol {
 
 pub type SymbolMap = HashMap<String, Symbol>;
 
-pub struct ELF<'a> {
-    elf: elf::Elf<'a>,
-    // 関数名->シンボルの対応をキャッシュする
+pub struct ELF {
     pub funcs: SymbolMap,
 }
 
-pub fn new<'a>(file: &'a [u8]) -> Result<ELF<'a>, ElfError> {
+pub fn new(file: &[u8]) -> Result<ELF, ElfError> {
     match Object::parse(file) {
         Ok(Object::Elf(elf)) => {
             let funcs = new_symbol_map(&elf.syms, &elf.strtab);
-            Ok(ELF { elf, funcs })
+            Ok(ELF { funcs })
         }
         _ => Err(ElfError::NotAnElfFile),
     }

@@ -1,6 +1,7 @@
-use std::io::Read;
-
 use clap::Parser;
+use clap::Subcommand;
+use std::process::Command;
+use std::process::Stdio;
 
 mod conf;
 mod elf;
@@ -8,31 +9,51 @@ mod error;
 mod maps;
 mod proc;
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
 
-struct Args {
-    #[arg(value_name = "PID")]
-    pid: i32,
+#[derive(Subcommand)]
+enum Commands {
+    Attach { pid: u32 },
+    Exec { path: String, args: Vec<String> },
 }
 
 const TARGET_SYMBOL: &str = "net/http.serverHandler.ServeHTTP";
 
-fn main() {
-    let args = Args::parse();
-    println!("Target PID: {}", args.pid);
+#[cfg(not(target_arch = "aarch64"))]
+compile_error!("This crate only supports aarch64 architecture");
 
-    let c = conf::new(args.pid);
+#[cfg(target_arch = "aarch64")]
+fn main() {
+    let c = match Cli::parse().command {
+        Commands::Attach { pid } => conf::new(pid, false),
+        Commands::Exec { path, args } => {
+            let mut command = Command::new(path);
+            for arg in args {
+                command.arg(arg);
+            }
+            let pid = command
+                .stderr(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .spawn()
+                .unwrap()
+                .id();
+            conf::new(pid.into(), true)
+        }
+    };
     let mut proc = c.trace().unwrap();
-    let mut buf = Vec::new();
-    proc.get_bin().read_to_end(&mut buf).unwrap();
-    let elf = elf::new(&buf).unwrap();
+    let elf = proc.get_bin().unwrap();
     let exec_base = proc
         .get_maps()
         .find(|m| m.executable)
         .map(|m| m.address.0)
         .unwrap();
-    elf.funcs
+    let _addr = elf
+        .funcs
         .get(TARGET_SYMBOL)
         .unwrap()
         .get_real_address(exec_base);

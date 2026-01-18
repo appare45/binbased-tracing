@@ -1,9 +1,10 @@
 use std::{
     fs::File,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
 };
 
 use crate::{
+    elf,
     error::ProcError,
     maps::{MemMap, parse_maps},
 };
@@ -13,13 +14,13 @@ use crate::{
  */
 
 pub struct Proc {
-    pid: i32,
+    pid: u32,
     bin_file: File,
     mem_file: File,
     map_file: File,
 }
 
-pub fn trace(pid: i32) -> Result<Proc, ProcError> {
+pub fn trace(pid: u32) -> Result<Proc, ProcError> {
     let bin_file = File::open(format!("/proc/{}/exe", pid)).map_err(|e| ProcError::Exe(e))?;
     let mem_file = File::open(format!("/proc/{}/mem", pid)).map_err(|e| ProcError::Mem(e))?;
     let map_file = File::open(format!("/proc/{}/maps", pid)).map_err(|e| ProcError::Map(e))?;
@@ -33,8 +34,12 @@ pub fn trace(pid: i32) -> Result<Proc, ProcError> {
 }
 
 impl Proc {
-    pub fn get_bin(&mut self) -> &mut File {
-        &mut self.bin_file
+    pub fn get_bin(&mut self) -> Result<elf::ELF, crate::error::ElfError> {
+        let mut buf = Vec::new();
+        self.bin_file
+            .read_to_end(&mut buf)
+            .map_err(|_| crate::error::ElfError::FailedToRead)?;
+        elf::new(&buf)
     }
 
     pub fn get_maps(&self) -> impl Iterator<Item = MemMap> {
@@ -47,11 +52,13 @@ impl Proc {
 
 #[cfg(test)]
 mod tests {
+    use std::u32;
+
     use super::*;
 
     #[test]
     fn test_trace_self() {
-        let pid = std::process::id() as i32;
+        let pid = std::process::id();
         let result = trace(pid);
         assert!(result.is_ok());
     }
@@ -59,7 +66,7 @@ mod tests {
     #[test]
     fn test_trace_error_is_exe_error() {
         use crate::error::ProcError;
-        let result = trace(-1);
+        let result = trace(u32::MAX);
         assert!(matches!(result, Err(ProcError::Exe(_))));
     }
 }

@@ -16,6 +16,9 @@ pub enum ProcError {
 pub enum ElfError {
     #[error("Not an Elf file")]
     NotAnElfFile,
+
+    #[error("Failed to read file")]
+    FailedToRead,
 }
 
 #[derive(Error, Debug)]

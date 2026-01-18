@@ -90,10 +90,4 @@ mod tests {
         let m: MemMap = line.try_into().unwrap();
         assert!(m.pathname.is_none());
     }
-
-    #[test]
-    fn test_get_exec_base() {
-        let result = get_exec_base(SAMPLE_LINE).unwrap();
-        assert_eq!(result, 0x00400000);
-    }
 }
