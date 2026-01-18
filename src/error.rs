@@ -9,3 +9,12 @@ pub enum ProcError {
     #[error("proc's mem file is not available")]
     Mem(#[source] io::Error),
 }
+
+#[derive(Error, Debug)]
+pub enum ElfError {
+    #[error("Failed to read elf file")]
+    ReadError(#[source] goblin::error::Error),
+
+    #[error("Not an Elf file")]
+    NotAnElfFile,
+}

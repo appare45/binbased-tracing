@@ -21,6 +21,12 @@ pub fn trace(pid: i32) -> Result<Proc, ProcError> {
     });
 }
 
+impl Proc {
+    pub fn get_bin(&mut self) -> &mut File {
+        &mut self.bin
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,6 +1,7 @@
 use clap::Parser;
 
 mod conf;
+mod elf;
 mod error;
 mod proc;
 
@@ -17,5 +18,6 @@ fn main() {
     println!("Target PID: {}", args.pid);
 
     let c = conf::new(args.pid);
-    let _ = c.trace().unwrap();
+    let mut t = c.trace().unwrap();
+    let _elf = elf::new(t.get_bin()).unwrap();
 }
