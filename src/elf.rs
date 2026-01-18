@@ -11,17 +11,17 @@ use crate::error::ElfError;
 pub struct Symbol(Sym);
 
 impl Symbol {
-    fn get_real_address(&self, base: u64) -> u64 {
+    pub fn get_real_address(&self, base: u64) -> u64 {
         base + self.0.st_value
     }
 }
 
-pub type SymbolMap = HashMap<String, Sym>;
+pub type SymbolMap = HashMap<String, Symbol>;
 
 pub struct ELF<'a> {
     elf: elf::Elf<'a>,
     // 関数名->シンボルの対応をキャッシュする
-    funcs: SymbolMap,
+    pub funcs: SymbolMap,
 }
 
 pub fn new<'a>(file: &'a [u8]) -> Result<ELF<'a>, ElfError> {
@@ -40,7 +40,7 @@ fn new_symbol_map(symtab: &Symtab, strtab: &Strtab) -> SymbolMap {
         if sym.is_function()
             && let Some(name) = strtab.get_at(sym.st_name)
         {
-            symbol_map.insert(name.to_string(), sym);
+            symbol_map.insert(name.to_string(), Symbol(sym));
         }
     }
     symbol_map

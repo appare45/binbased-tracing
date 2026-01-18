@@ -8,6 +8,8 @@ pub enum ProcError {
     Exe(#[source] io::Error),
     #[error("proc's mem file is not available")]
     Mem(#[source] io::Error),
+    #[error("proc's map file is not available")]
+    Map(#[source] io::Error),
 }
 
 #[derive(Error, Debug)]

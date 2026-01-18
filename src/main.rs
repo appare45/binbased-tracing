@@ -16,13 +16,24 @@ struct Args {
     pid: i32,
 }
 
+const TARGET_SYMBOL: &str = "net/http.serverHandler.ServeHTTP";
+
 fn main() {
     let args = Args::parse();
     println!("Target PID: {}", args.pid);
 
     let c = conf::new(args.pid);
-    let mut t = c.trace().unwrap();
+    let mut proc = c.trace().unwrap();
     let mut buf = Vec::new();
-    t.get_bin().read_to_end(&mut buf).unwrap();
-    let _elf = elf::new(&buf).unwrap();
+    proc.get_bin().read_to_end(&mut buf).unwrap();
+    let elf = elf::new(&buf).unwrap();
+    let exec_base = proc
+        .get_maps()
+        .find(|m| m.executable)
+        .map(|m| m.address.0)
+        .unwrap();
+    elf.funcs
+        .get(TARGET_SYMBOL)
+        .unwrap()
+        .get_real_address(exec_base);
 }
