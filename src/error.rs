@@ -12,9 +12,6 @@ pub enum ProcError {
 
 #[derive(Error, Debug)]
 pub enum ElfError {
-    #[error("Failed to read elf file")]
-    ReadError(#[source] goblin::error::Error),
-
     #[error("Not an Elf file")]
     NotAnElfFile,
 }

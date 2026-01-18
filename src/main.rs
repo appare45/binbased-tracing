@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use clap::Parser;
 
 mod conf;
@@ -19,5 +21,7 @@ fn main() {
 
     let c = conf::new(args.pid);
     let mut t = c.trace().unwrap();
-    let _elf = elf::new(t.get_bin()).unwrap();
+    let mut buf = Vec::new();
+    t.get_bin().read_to_end(&mut buf).unwrap();
+    let _elf = elf::new(&buf).unwrap();
 }
