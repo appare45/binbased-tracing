@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use goblin::{
     Object,
-    elf::{self, Sym, Symtab},
+    elf::{Sym, Symtab, program_header::PT_LOAD},
     strtab::Strtab,
 };
 
@@ -20,13 +20,28 @@ pub type SymbolMap = HashMap<String, Symbol>;
 
 pub struct ELF {
     pub funcs: SymbolMap,
+    load_base: u64,
+}
+
+impl ELF {
+    pub fn get_symbol_offset(&self, name: String) -> Result<u64, ElfError> {
+        let sym = self.funcs.get(&name).ok_or(ElfError::NotFound)?;
+        Ok(sym.0.st_value - self.load_base)
+    }
 }
 
 pub fn new(file: &[u8]) -> Result<ELF, ElfError> {
     match Object::parse(file) {
         Ok(Object::Elf(elf)) => {
             let funcs = new_symbol_map(&elf.syms, &elf.strtab);
-            Ok(ELF { funcs })
+            let load_base = elf
+                .program_headers
+                .iter()
+                .find(|ph| ph.is_executable() && ph.p_type == PT_LOAD)
+                .map(|ph| ph.p_vaddr)
+                .unwrap_or(0);
+
+            Ok(ELF { funcs, load_base })
         }
         _ => Err(ElfError::NotAnElfFile),
     }

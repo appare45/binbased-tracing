@@ -19,6 +19,9 @@ pub enum ElfError {
 
     #[error("Failed to read file")]
     FailedToRead,
+
+    #[error("Not found")]
+    NotFound,
 }
 
 #[derive(Error, Debug)]
