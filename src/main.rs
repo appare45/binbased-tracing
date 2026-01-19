@@ -6,6 +6,7 @@ use std::process::Stdio;
 mod conf;
 mod elf;
 mod error;
+mod instrument;
 mod maps;
 mod proc;
 mod ptrace;
@@ -56,6 +57,20 @@ fn main() {
     let (off, _sym) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
     let addr = off + exec_base;
     println!("{TARGET_SYMBOL} is at 0x{addr:x}");
-    let ptrace = ptrace::Tracee::try_from(&proc).unwrap();
-    let _ptrace = ptrace.interrupt().unwrap();
+
+    // ここでprocを消費する
+    let ptrace = ptrace::Tracee::try_from(proc).unwrap();
+    let instrument = instrument::Instrument::from(ptrace);
+    let instrument = instrument.pre_instrument().unwrap();
+
+    // instrumentationが完了したので、プロセスをdetachして実行を継続させる
+    match instrument {
+        instrument::Instrument::PreInstrumented(tracee) => {
+            tracee.detach().unwrap();
+            println!("Process detached successfully");
+        }
+        _ => {
+            eprintln!("Unexpected instrument state");
+        }
+    }
 }

@@ -47,6 +47,9 @@ pub enum PtraceError {
     #[error("Interrupt failed")]
     InterruptFailed(#[source] nix::errno::Errno),
 
+    #[error("Continue failed")]
+    ContinueFailed(#[source] nix::errno::Errno),
+
     #[error("WaitPID Failed")]
     WaitPIDFailed(#[source] nix::errno::Errno),
 
@@ -64,5 +67,25 @@ pub enum PtraceError {
 
     #[error("Failed to get registers")]
     GetRegistersFailed(#[source] nix::errno::Errno),
+
+    #[error("Failed to set registers")]
+    SetRegistersFailed(#[source] nix::errno::Errno),
+
+    #[error("Failed to read")]
+    ReadFailed(#[source] nix::errno::Errno),
+
+    #[error("Failed to write")]
+    WriteFailed(#[source] nix::errno::Errno),
 }
+
+#[derive(Error, Debug)]
+pub enum InstrumentError {
+    #[error("Already pre instrumented")]
+    AlreadyPreInstrumented,
+
+    #[error("Ptrace error")]
+    PtraceError(#[from] PtraceError),
+
+    #[error("Unknown")]
+    Unknown,
 }
