@@ -3,7 +3,7 @@ use std::{
     io::{BufRead, BufReader, Read},
 };
 
-use nix::unistd;
+use nix::{sys::ptrace, unistd};
 
 use crate::{
     elf,
@@ -16,13 +16,13 @@ use crate::{
  */
 
 pub struct Proc {
-    pid: unistd::Pid,
+    pub pid: unistd::Pid,
     bin_file: File,
     mem_file: File,
     map_file: File,
 }
 
-pub fn trace(pid: unistd::Pid) -> Result<Proc, ProcError> {
+pub fn new(pid: unistd::Pid) -> Result<Proc, ProcError> {
     let bin_file = File::open(format!("/proc/{pid}/exe")).map_err(|e| ProcError::Exe(e))?;
     let mem_file = File::open(format!("/proc/{pid}/mem")).map_err(|e| ProcError::Mem(e))?;
     let map_file = File::open(format!("/proc/{pid}/maps")).map_err(|e| ProcError::Map(e))?;
@@ -59,14 +59,14 @@ mod tests {
     #[test]
     fn test_trace_self() {
         let pid = unistd::Pid::from_raw(std::process::id() as i32);
-        let result = trace(pid);
+        let result = new(pid);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_trace_error_is_exe_error() {
         use crate::error::ProcError;
-        let result = trace(unistd::Pid::from_raw(-1));
+        let result = new(unistd::Pid::from_raw(-1));
         assert!(matches!(result, Err(ProcError::Exe(_))));
     }
 }

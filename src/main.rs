@@ -8,6 +8,7 @@ mod elf;
 mod error;
 mod maps;
 mod proc;
+mod ptrace;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -52,7 +53,9 @@ fn main() {
         .find(|m| m.executable)
         .map(|m| m.address.0)
         .unwrap();
-    let (off, sym) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
+    let (off, _sym) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
     let addr = off + exec_base;
     println!("{TARGET_SYMBOL} is at 0x{addr:x}");
+    let ptrace = ptrace::Tracee::try_from(&proc).unwrap();
+    let _ptrace = ptrace.interrupt().unwrap();
 }

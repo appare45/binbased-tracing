@@ -35,3 +35,24 @@ pub enum MapsError {
     #[error("Parse error")]
     ParseError,
 }
+
+#[derive(Error, Debug)]
+pub enum PtraceError {
+    #[error("Attaching failed")]
+    AttachFailed(#[source] nix::errno::Errno),
+
+    #[error("Already stopped")]
+    AlreadyStopped,
+
+    #[error("Interrupt failed")]
+    InterruptFailed(#[source] nix::errno::Errno),
+
+    #[error("WaitPID Failed")]
+    WaitPIDFailed(#[source] nix::errno::Errno),
+
+    #[error("WaitPID unexpected status")]
+    WaitPIDUnexpectedStatus(nix::sys::wait::WaitStatus),
+
+    #[error("Program Exited")]
+    ProgramExited,
+}

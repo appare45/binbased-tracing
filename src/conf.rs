@@ -13,7 +13,7 @@ pub fn new(pid: unistd::Pid, should_exit: bool) -> Conf {
 
 impl Conf {
     pub fn trace(&self) -> Result<proc::Proc, ProcError> {
-        proc::trace(self.pid)
+        proc::new(self.pid)
     }
 }
 
