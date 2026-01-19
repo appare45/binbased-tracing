@@ -3,6 +3,8 @@ use std::{
     io::{BufRead, BufReader, Read},
 };
 
+use nix::unistd;
+
 use crate::{
     elf,
     error::ProcError,
@@ -14,13 +16,13 @@ use crate::{
  */
 
 pub struct Proc {
-    pid: u32,
+    pid: unistd::Pid,
     bin_file: File,
     mem_file: File,
     map_file: File,
 }
 
-pub fn trace(pid: u32) -> Result<Proc, ProcError> {
+pub fn trace(pid: unistd::Pid) -> Result<Proc, ProcError> {
     let bin_file = File::open(format!("/proc/{pid}/exe")).map_err(|e| ProcError::Exe(e))?;
     let mem_file = File::open(format!("/proc/{pid}/mem")).map_err(|e| ProcError::Mem(e))?;
     let map_file = File::open(format!("/proc/{pid}/maps")).map_err(|e| ProcError::Map(e))?;
@@ -52,13 +54,11 @@ impl Proc {
 
 #[cfg(test)]
 mod tests {
-    use std::u32;
-
     use super::*;
 
     #[test]
     fn test_trace_self() {
-        let pid = std::process::id();
+        let pid = unistd::Pid::from_raw(std::process::id() as i32);
         let result = trace(pid);
         assert!(result.is_ok());
     }
@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn test_trace_error_is_exe_error() {
         use crate::error::ProcError;
-        let result = trace(u32::MAX);
+        let result = trace(unistd::Pid::from_raw(-1));
         assert!(matches!(result, Err(ProcError::Exe(_))));
     }
 }

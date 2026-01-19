@@ -18,7 +18,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Attach { pid: u32 },
+    Attach { pid: i32 },
     Exec { path: String, args: Vec<String> },
 }
 
@@ -30,7 +30,7 @@ compile_error!("This crate only supports aarch64 architecture");
 #[cfg(target_arch = "aarch64")]
 fn main() {
     let c = match Cli::parse().command {
-        Commands::Attach { pid } => conf::new(pid, false),
+        Commands::Attach { pid } => conf::new(nix::unistd::Pid::from_raw(pid), false),
         Commands::Exec { path, args } => {
             let mut command = Command::new(path);
             for arg in args {
@@ -42,7 +42,7 @@ fn main() {
                 .spawn()
                 .unwrap()
                 .id();
-            conf::new(pid.into(), true)
+            conf::new(nix::unistd::Pid::from_raw(pid as i32), true)
         }
     };
     let mut proc = c.trace().unwrap();
