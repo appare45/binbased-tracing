@@ -21,9 +21,9 @@ pub struct Proc {
 }
 
 pub fn trace(pid: u32) -> Result<Proc, ProcError> {
-    let bin_file = File::open(format!("/proc/{}/exe", pid)).map_err(|e| ProcError::Exe(e))?;
-    let mem_file = File::open(format!("/proc/{}/mem", pid)).map_err(|e| ProcError::Mem(e))?;
-    let map_file = File::open(format!("/proc/{}/maps", pid)).map_err(|e| ProcError::Map(e))?;
+    let bin_file = File::open(format!("/proc/{pid}/exe")).map_err(|e| ProcError::Exe(e))?;
+    let mem_file = File::open(format!("/proc/{pid}/mem")).map_err(|e| ProcError::Mem(e))?;
+    let map_file = File::open(format!("/proc/{pid}/maps")).map_err(|e| ProcError::Map(e))?;
 
     return Ok(Proc {
         pid,

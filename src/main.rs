@@ -52,6 +52,7 @@ fn main() {
         .find(|m| m.executable)
         .map(|m| m.address.0)
         .unwrap();
-    let addr = exec_base + elf.get_symbol_offset(TARGET_SYMBOL.into()).unwrap();
+    let (off, sym) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
+    let addr = off + exec_base;
     println!("{TARGET_SYMBOL} is at 0x{addr:x}");
 }

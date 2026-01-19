@@ -34,7 +34,4 @@ pub enum MapsError {
 
     #[error("Parse error")]
     ParseError,
-
-    #[error("Not found")]
-    NotFound,
 }

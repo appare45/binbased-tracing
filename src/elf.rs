@@ -10,12 +10,6 @@ use crate::error::ElfError;
 
 pub struct Symbol(Sym);
 
-impl Symbol {
-    pub fn get_real_address(&self, base: u64) -> u64 {
-        base + self.0.st_value
-    }
-}
-
 pub type SymbolMap = HashMap<String, Symbol>;
 
 pub struct ELF {
@@ -24,9 +18,10 @@ pub struct ELF {
 }
 
 impl ELF {
-    pub fn get_symbol_offset(&self, name: String) -> Result<u64, ElfError> {
+    // Symbol offset, size
+    pub fn get_symbol(&self, name: String) -> Result<(u64, u64), ElfError> {
         let sym = self.funcs.get(&name).ok_or(ElfError::NotFound)?;
-        Ok(sym.0.st_value - self.load_base)
+        Ok((sym.0.st_value - self.load_base, sym.0.st_size))
     }
 }
 
