@@ -3,7 +3,7 @@ use std::{
     io::{BufRead, BufReader, Read},
 };
 
-use nix::{sys::ptrace, unistd};
+use nix::unistd;
 
 use crate::{
     elf,
@@ -23,9 +23,9 @@ pub struct Proc {
 }
 
 pub fn new(pid: unistd::Pid) -> Result<Proc, ProcError> {
-    let bin_file = File::open(format!("/proc/{pid}/exe")).map_err(|e| ProcError::Exe(e))?;
-    let mem_file = File::open(format!("/proc/{pid}/mem")).map_err(|e| ProcError::Mem(e))?;
-    let map_file = File::open(format!("/proc/{pid}/maps")).map_err(|e| ProcError::Map(e))?;
+    let bin_file = File::open(format!("/proc/{pid}/exe")).map_err(ProcError::Exe)?;
+    let mem_file = File::open(format!("/proc/{pid}/mem")).map_err(ProcError::Mem)?;
+    let map_file = File::open(format!("/proc/{pid}/maps")).map_err(ProcError::Map)?;
 
     return Ok(Proc {
         pid,

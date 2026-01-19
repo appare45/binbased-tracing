@@ -55,4 +55,14 @@ pub enum PtraceError {
 
     #[error("Program Exited")]
     ProgramExited,
+
+    #[error("Failed to detach")]
+    DetachFailed(#[source] nix::errno::Errno),
+
+    #[error("Process is running")]
+    ProcessRunning,
+
+    #[error("Failed to get registers")]
+    GetRegistersFailed(#[source] nix::errno::Errno),
+}
 }

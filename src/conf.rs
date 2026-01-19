@@ -20,6 +20,7 @@ impl Conf {
 impl Drop for Conf {
     fn drop(&mut self) {
         if self.should_exit {
+            println!("Stopping process");
             // TODO: 本当に終了したかチェックする
             if signal::kill(self.pid, signal::SIGTERM).is_err() {
                 eprintln!("Failed to send SIGTERM")

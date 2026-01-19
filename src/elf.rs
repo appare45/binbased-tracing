@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use goblin::{
     Object,
-    elf::{Sym, Symtab, program_header::PT_LOAD},
+    elf::{Sym, Symtab, program_header},
     strtab::Strtab,
 };
 
@@ -32,7 +32,7 @@ pub fn new(file: &[u8]) -> Result<ELF, ElfError> {
             let load_base = elf
                 .program_headers
                 .iter()
-                .find(|ph| ph.is_executable() && ph.p_type == PT_LOAD)
+                .find(|ph| ph.is_executable() && ph.p_type == program_header::PT_LOAD)
                 .map(|ph| ph.p_vaddr)
                 .unwrap_or(0);
 
