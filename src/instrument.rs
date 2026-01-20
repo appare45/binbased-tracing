@@ -1,5 +1,3 @@
-use std::os::raw::c_void;
-
 use crate::{error::InstrumentError, ptrace};
 
 pub enum Instrument {
@@ -21,29 +19,17 @@ impl Instrument {
     pub fn pre_instrument(self) -> Result<Instrument, InstrumentError> {
         match self {
             Instrument::NotInstrumented(tracee) => {
-                // traceeをstopする
-                tracee.stop()?;
-                let tracee = tracee.wait()?;
-                let regs = tracee.get_regs()?;
-                let mut replaced = Vec::new();
                 let instructions = build_mmap();
-                for (i, b) in instructions.iter().enumerate() {
-                    let addr = regs.pc + (i as u64) * 0x8;
-                    let original = tracee.read(addr)?;
-                    replaced.push(original);
 
-                    tracee.write(addr, *b)?;
-                }
-                let tracee = tracee.cont()?;
-                let tracee = tracee.wait()?;
-                // 元の8バイト値を2命令分ずつ復元
-                for (chunk_idx, original_value) in replaced.iter().enumerate() {
-                    let addr = regs.pc + (chunk_idx as u64) * 0x8; // 8バイト単位でアドレス計算
-                    tracee.write(addr, *original_value)?;
-                }
-                let mut current_regs = tracee.get_regs()?;
-                current_regs.pc = regs.pc;
-                tracee.set_regs(current_regs)?;
+                let tracee = tracee.stop()?;
+                let regs = tracee.get_regs()?;
+                let pc = regs.pc;
+                let saved = tracee.write_instructions(pc, &instructions)?;
+
+                let tracee = tracee.cont()?.wait()?;
+                tracee.write_instructions(pc, &saved)?;
+                tracee.set_regs(regs)?;
+
                 Ok(Instrument::PreInstrumented(tracee))
             }
             _ => Err(InstrumentError::AlreadyPreInstrumented),

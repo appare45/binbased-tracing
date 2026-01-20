@@ -21,10 +21,11 @@ impl TryFrom<proc::Proc> for Tracee {
 }
 
 impl Tracee {
-    pub fn stop(&self) -> Result<(), PtraceError> {
+    pub fn stop(self) -> Result<Tracee, PtraceError> {
         match self {
             Tracee::Attached(proc) => {
-                ptrace::interrupt(proc.pid).map_err(PtraceError::InterruptFailed)
+                ptrace::interrupt(proc.pid).map_err(PtraceError::InterruptFailed)?;
+                Tracee::Attached(proc).wait()
             }
             Tracee::Stopped(_) => Err(PtraceError::AlreadyStopped),
         }
@@ -66,29 +67,12 @@ impl Tracee {
 
     pub fn wait(self) -> Result<Tracee, PtraceError> {
         match self {
-            Tracee::Attached(proc) => loop {
-                match wait::waitpid(proc.pid, None).map_err(PtraceError::WaitPIDFailed)? {
-                    wait::WaitStatus::PtraceEvent(_, Signal::SIGTRAP, _) => {
-                        return Ok(Tracee::Stopped(proc));
-                    }
-                    wait::WaitStatus::Stopped(_, Signal::SIGTRAP) => {
-                        return Ok(Tracee::Stopped(proc));
-                    }
-                    wait::WaitStatus::Stopped(_, sig) => {
-                        // SIGTRAP以外のシグナルを受け取った場合は、シグナルを転送して継続
-                        eprintln!("[DEBUG] Received signal {:?}, forwarding and continuing", sig);
-                        ptrace::cont(proc.pid, sig).map_err(PtraceError::ContinueFailed)?;
-                        // 次のイベントを待つためにループを続ける
-                    }
-                    wait::WaitStatus::Exited(_, _) => return Err(PtraceError::ProgramExited),
-                    status => return Err(PtraceError::WaitPIDUnexpectedStatus(status)),
-                }
-            },
+            Tracee::Attached(proc) => wait_for_sigtrap(proc),
             Tracee::Stopped(_) => Err(PtraceError::AlreadyStopped),
         }
     }
 
-    pub fn read(&self, addr: u64) -> Result<i64, PtraceError> {
+    fn read(&self, addr: u64) -> Result<i64, PtraceError> {
         match self {
             Tracee::Stopped(proc) => {
                 ptrace::read(proc.pid, addr as *mut c_void).map_err(PtraceError::ReadFailed)
@@ -97,12 +81,48 @@ impl Tracee {
         }
     }
 
-    pub fn write(&self, addr: u64, v: i64) -> Result<(), PtraceError> {
+    fn write(&self, addr: u64, v: i64) -> Result<(), PtraceError> {
         match self {
             Tracee::Stopped(proc) => {
                 ptrace::write(proc.pid, addr as *mut c_void, v).map_err(PtraceError::WriteFailed)
             }
             _ => Err(PtraceError::ProcessRunning),
+        }
+    }
+
+    pub fn write_instructions(
+        &self,
+        addr: u64,
+        instructions: &[i64],
+    ) -> Result<Vec<i64>, PtraceError> {
+        let mut saved = Vec::with_capacity(instructions.len());
+        for (i, &instr) in instructions.iter().enumerate() {
+            let offset = (i as u64) * 8;
+            saved.push(self.read(addr + offset)?);
+            self.write(addr + offset, instr)?;
+        }
+        Ok(saved)
+    }
+}
+
+fn wait_for_sigtrap(proc: proc::Proc) -> Result<Tracee, PtraceError> {
+    loop {
+        match wait::waitpid(proc.pid, None).map_err(PtraceError::WaitPIDFailed)? {
+            wait::WaitStatus::PtraceEvent(_, Signal::SIGTRAP, _) => {
+                return Ok(Tracee::Stopped(proc));
+            }
+            wait::WaitStatus::Stopped(_, Signal::SIGTRAP) => {
+                return Ok(Tracee::Stopped(proc));
+            }
+            wait::WaitStatus::Stopped(_, sig) => {
+                eprintln!(
+                    "[DEBUG] Received signal {:?}, forwarding and continuing",
+                    sig
+                );
+                ptrace::cont(proc.pid, sig).map_err(PtraceError::ContinueFailed)?;
+            }
+            wait::WaitStatus::Exited(_, _) => return Err(PtraceError::ProgramExited),
+            status => return Err(PtraceError::WaitPIDUnexpectedStatus(status)),
         }
     }
 }
