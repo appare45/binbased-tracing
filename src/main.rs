@@ -49,11 +49,7 @@ fn main() {
     };
     let mut proc = c.trace().unwrap();
     let elf = proc.get_bin().unwrap();
-    let exec_base = proc
-        .get_maps()
-        .find(|m| m.executable)
-        .map(|m| m.address.0)
-        .unwrap();
+    let exec_base = proc.exe_base().unwrap();
     let (off, _sym) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
     let addr = off + exec_base;
     println!("{TARGET_SYMBOL} is at 0x{addr:x}");

@@ -1,14 +1,14 @@
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Read},
+    io::{BufReader, Read},
 };
 
 use nix::unistd;
 
 use crate::{
     elf,
-    error::ProcError,
-    maps::{MemMap, parse_maps},
+    error::{ElfError, ProcError},
+    maps,
 };
 
 /**
@@ -18,21 +18,12 @@ use crate::{
 pub struct Proc {
     pub pid: unistd::Pid,
     bin_file: File,
-    mem_file: File,
-    map_file: File,
 }
 
 pub fn new(pid: unistd::Pid) -> Result<Proc, ProcError> {
     let bin_file = File::open(format!("/proc/{pid}/exe")).map_err(ProcError::Exe)?;
-    let mem_file = File::open(format!("/proc/{pid}/mem")).map_err(ProcError::Mem)?;
-    let map_file = File::open(format!("/proc/{pid}/maps")).map_err(ProcError::Map)?;
 
-    return Ok(Proc {
-        pid,
-        bin_file,
-        mem_file,
-        map_file,
-    });
+    return Ok(Proc { pid, bin_file });
 }
 
 impl Proc {
@@ -44,11 +35,16 @@ impl Proc {
         elf::new(&buf)
     }
 
-    pub fn get_maps(&self) -> impl Iterator<Item = MemMap> {
-        let lines = BufReader::new(&self.map_file)
-            .lines()
-            .filter_map(Result::ok);
-        parse_maps(lines)
+    fn get_maps(&self) -> Result<impl Iterator<Item = maps::MemMap>, ElfError> {
+        let file = File::open(format!("/proc/{}/maps", self.pid))?;
+        Ok(maps::parse_maps(BufReader::new(file)))
+    }
+
+    pub fn exe_base(&self) -> Option<u64> {
+        self.get_maps()
+            .ok()?
+            .find(|m| m.executable)
+            .map(|m| m.address.0)
     }
 }
 

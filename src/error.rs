@@ -6,10 +6,6 @@ use thiserror::Error;
 pub enum ProcError {
     #[error("proc's exe file is not available")]
     Exe(#[source] io::Error),
-    #[error("proc's mem file is not available")]
-    Mem(#[source] io::Error),
-    #[error("proc's map file is not available")]
-    Map(#[source] io::Error),
 }
 
 #[derive(Error, Debug)]
@@ -19,6 +15,9 @@ pub enum ElfError {
 
     #[error("Failed to read file")]
     FailedToRead,
+
+    #[error("IO error")]
+    IoError(#[from] std::io::Error),
 
     #[error("Not found")]
     NotFound,
@@ -85,7 +84,4 @@ pub enum InstrumentError {
 
     #[error("Ptrace error")]
     PtraceError(#[from] PtraceError),
-
-    #[error("Unknown")]
-    Unknown,
 }

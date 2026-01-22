@@ -81,7 +81,7 @@ impl Tracee {
         }
     }
 
-    fn write(&self, addr: u64, v: i64) -> Result<(), PtraceError> {
+    fn write_one(&self, addr: u64, v: i64) -> Result<(), PtraceError> {
         match self {
             Tracee::Stopped(proc) => {
                 ptrace::write(proc.pid, addr as *mut c_void, v).map_err(PtraceError::WriteFailed)
@@ -90,18 +90,21 @@ impl Tracee {
         }
     }
 
-    pub fn write_instructions(
-        &self,
-        addr: u64,
-        instructions: &[i64],
-    ) -> Result<Vec<i64>, PtraceError> {
+    pub fn write(&self, addr: u64, instructions: &[i64]) -> Result<Vec<i64>, PtraceError> {
         let mut saved = Vec::with_capacity(instructions.len());
         for (i, &instr) in instructions.iter().enumerate() {
             let offset = (i as u64) * 8;
             saved.push(self.read(addr + offset)?);
-            self.write(addr + offset, instr)?;
+            self.write_one(addr + offset, instr)?;
         }
         Ok(saved)
+    }
+
+    pub fn base(&self) -> Option<u64> {
+        match self {
+            Tracee::Attached(proc) => proc.exe_base(),
+            Tracee::Stopped(proc) => proc.exe_base(),
+        }
     }
 }
 
