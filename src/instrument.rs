@@ -1,4 +1,4 @@
-use crate::{error::InstrumentError, proc, ptrace};
+use crate::{error::InstrumentError, instruction, proc, ptrace};
 
 pub enum Instrument {
     NotInstrumented(ptrace::Tracee),
@@ -43,7 +43,7 @@ impl Instrument {
                 }
                 regs.regs[8] = 222;
                 tracee.set_regs(regs)?;
-                let saved = tracee.write(pc, &combine_i32_to_i64(instructions))?;
+                let saved = tracee.write(pc, &instructions)?;
 
                 let tracee = tracee.cont()?.wait()?;
                 let addr = tracee.get_regs()?.regs[0];
@@ -61,7 +61,7 @@ impl Instrument {
         match self {
             Instrument::PreInstrumented(tracee, trampoline_addr) => {
                 let trampoline = build_trampoline();
-                tracee.write(trampoline_addr, &combine_i32_to_i64(trampoline))?;
+                tracee.write(trampoline_addr, &trampoline)?;
                 let saved_regs = tracee.get_regs()?;
                 let mut regs = saved_regs.clone();
                 let pc = regs.pc;
@@ -76,7 +76,7 @@ impl Instrument {
                 regs.regs[8] = 226;
                 tracee.set_regs(regs)?;
                 let buf = build_svc();
-                let before = tracee.write(pc, &combine_i32_to_i64(buf))?;
+                let before = tracee.write(pc, &buf)?;
                 let tracee = tracee.cont()?;
                 let tracee = tracee.wait()?;
                 match tracee.get_regs()?.regs[0] {
@@ -88,9 +88,10 @@ impl Instrument {
                 // TODO: このあたりを分割したい
                 let elf = tracee.get_bin().unwrap();
                 let exec_base = tracee.base().unwrap();
-                let (off, _sym) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
+                let (off, _size) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
                 let target_addr = off + exec_base;
                 println!("{TARGET_SYMBOL} is at 0x{target_addr:x}");
+                let target_bin_head = tracee.read(target_addr)?;
                 Ok(Instrument::Instrumented(tracee.detach()?))
             }
             _ => Err(InstrumentError::NotPreInstrumentd),
@@ -99,36 +100,43 @@ impl Instrument {
 }
 
 // システムコールを呼び出す
-fn build_svc() -> Vec<u32> {
-    let mut buf = Vec::new();
-    buf.push(0xd4000001);
-    buf.push(0xd4200000); // svc #0; brk #0
-    return buf;
+fn build_svc() -> instruction::Instructions {
+    let mut instructions = instruction::Instructions::new();
+    instructions.push(0xd4000001);
+    instructions.push(0xd4200000); // svc #0; brk #0
+    return instructions;
 }
 
-fn build_trampoline() -> Vec<u32> {
-    let mut buf = Vec::new();
-    buf.push(0x52800820u32);
-    buf.push(0x381f0fe0u32);
-    buf.push(0xd2800020u32);
-    buf.push(0x910003e1u32);
-    buf.push(0xd2800022u32);
-    buf.push(0xd2800808u32);
-    buf.push(0xd4000001u32);
-    buf.push(0x910043ffu32);
-    buf.push(0xd65f03c0u32);
-    return buf;
+fn build_trampoline() -> instruction::Instructions {
+    let mut instructions = instruction::Instructions::new();
+    instructions.join(push_registers_to_stack());
+    instructions.push(0x52800820u32);
+    instructions.push(0x381f0fe0u32);
+    instructions.push(0xd2800020u32);
+    instructions.push(0x910003e1u32);
+    instructions.push(0xd2800022u32);
+    instructions.push(0xd2800808u32);
+    instructions.push(0xd4000001u32);
+    instructions.push(0x910043ffu32);
+    instructions.push(0xd65f03c0u32);
+    return instructions;
 }
 
-fn combine_i32_to_i64(input: Vec<u32>) -> Vec<i64> {
-    input
-        .chunks_exact(2)
-        .map(|chunk| {
-            let low = chunk[0] as i64;
-            let high = chunk[1] as i64;
+fn push_registers_to_stack() -> instruction::Instructions {
+    let mut instructions = instruction::Instructions::new();
+    for i in 0..15 {
+        let rt = i * 2;
+        let rt2 = i * 2 + 1;
+        let rn = 31; // sp is index 31 (0b11111)
+        let imm7 = (16 * i) / 8; // Scale the offset by 8
 
-            // Combine in little-endian order: low 32 bits first, then high 32 bits
-            (high << 32) | (low & 0xFFFFFFFF)
-        })
-        .collect()
+        let instr = 0b1010100100 << 22
+            | (imm7 & 0x7F) << 15
+            | (rt2 & 0x1F) << 10
+            | (rn & 0x1F) << 5
+            | (rt & 0x1F);
+        instructions.push(instr);
+    }
+    instructions.push(0xf9007bfe);
+    instructions
 }

@@ -6,6 +6,7 @@ use std::process::Stdio;
 mod conf;
 mod elf;
 mod error;
+mod instruction;
 mod instrument;
 mod maps;
 mod proc;
@@ -45,7 +46,7 @@ fn main() {
             conf::new(nix::unistd::Pid::from_raw(pid as i32), true)
         }
     };
-    let mut proc = c.trace().unwrap();
+    let proc = c.trace().unwrap();
 
     // ここでprocを消費する
     let ptrace = ptrace::Tracee::try_from(proc).unwrap();

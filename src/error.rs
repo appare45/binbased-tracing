@@ -5,16 +5,13 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum ProcError {
     #[error("proc's exe file is not available")]
-    Exe(#[source] io::Error),
+    FailedToGetStatus(#[source] io::Error),
 }
 
 #[derive(Error, Debug)]
 pub enum ElfError {
     #[error("Not an Elf file")]
     NotAnElfFile,
-
-    #[error("Failed to read file")]
-    FailedToRead,
 
     #[error("IO error")]
     IoError(#[from] std::io::Error),

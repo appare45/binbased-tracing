@@ -3,7 +3,7 @@ use nix::{
     sys::{ptrace, signal::Signal, wait},
 };
 
-use crate::{elf, error::PtraceError, proc};
+use crate::{elf, error::PtraceError, instruction, proc};
 
 pub enum Tracee {
     Attached(proc::Proc),
@@ -72,7 +72,7 @@ impl Tracee {
         }
     }
 
-    fn read(&self, addr: u64) -> Result<i64, PtraceError> {
+    pub fn read(&self, addr: u64) -> Result<i64, PtraceError> {
         match self {
             Tracee::Stopped(proc) => {
                 ptrace::read(proc.pid, addr as *mut c_void).map_err(PtraceError::ReadFailed)
@@ -90,14 +90,19 @@ impl Tracee {
         }
     }
 
-    pub fn write(&self, addr: u64, instructions: &[i64]) -> Result<Vec<i64>, PtraceError> {
+    pub fn write(
+        &self,
+        addr: u64,
+        instructions: &instruction::Instructions,
+    ) -> Result<instruction::Instructions, PtraceError> {
+        let instructions = instructions.raw();
         let mut saved = Vec::with_capacity(instructions.len());
         for (i, &instr) in instructions.iter().enumerate() {
             let offset = (i as u64) * 8;
             saved.push(self.read(addr + offset)?);
             self.write_one(addr + offset, instr)?;
         }
-        Ok(saved)
+        Ok(saved.into())
     }
 
     pub fn base(&self) -> Option<u64> {

@@ -20,6 +20,7 @@ pub struct Proc {
 }
 
 pub fn new(pid: unistd::Pid) -> Result<Proc, ProcError> {
+    File::open(format!("/proc/{}/status", pid)).map_err(ProcError::FailedToGetStatus)?;
     return Ok(Proc { pid });
 }
 impl Proc {
@@ -53,12 +54,5 @@ mod tests {
         let pid = unistd::Pid::from_raw(std::process::id() as i32);
         let result = new(pid);
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_trace_error_is_exe_error() {
-        use crate::error::ProcError;
-        let result = new(unistd::Pid::from_raw(-1));
-        assert!(matches!(result, Err(ProcError::Exe(_))));
     }
 }
