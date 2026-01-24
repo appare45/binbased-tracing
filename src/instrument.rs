@@ -43,7 +43,7 @@ impl Instrument {
                 }
                 regs.regs[8] = 222;
                 tracee.set_regs(regs)?;
-                let saved = tracee.write(pc, &instructions)?;
+                let saved = tracee.write(pc, &combine_i32_to_i64(instructions))?;
 
                 let tracee = tracee.cont()?.wait()?;
                 let addr = tracee.get_regs()?.regs[0];
@@ -61,7 +61,7 @@ impl Instrument {
         match self {
             Instrument::PreInstrumented(tracee, trampoline_addr) => {
                 let trampoline = build_trampoline();
-                tracee.write(trampoline_addr, &trampoline)?;
+                tracee.write(trampoline_addr, &combine_i32_to_i64(trampoline))?;
                 let saved_regs = tracee.get_regs()?;
                 let mut regs = saved_regs.clone();
                 let pc = regs.pc;
@@ -76,7 +76,7 @@ impl Instrument {
                 regs.regs[8] = 226;
                 tracee.set_regs(regs)?;
                 let buf = build_svc();
-                let before = tracee.write(pc, &buf)?;
+                let before = tracee.write(pc, &combine_i32_to_i64(buf))?;
                 let tracee = tracee.cont()?;
                 let tracee = tracee.wait()?;
                 match tracee.get_regs()?.regs[0] {
@@ -85,7 +85,7 @@ impl Instrument {
                 }
                 tracee.write(pc, &before)?;
                 tracee.set_regs(saved_regs)?;
-                // TODO: このあたりを分割
+                // TODO: このあたりを分割したい
                 let elf = tracee.get_bin().unwrap();
                 let exec_base = tracee.base().unwrap();
                 let (off, _sym) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
@@ -99,18 +99,36 @@ impl Instrument {
 }
 
 // システムコールを呼び出す
-fn build_svc() -> Vec<i64> {
+fn build_svc() -> Vec<u32> {
     let mut buf = Vec::new();
-    buf.push(0xd4000001u64 as i64 | 0xd4200000 << 32); // svc #0; brk #0
+    buf.push(0xd4000001);
+    buf.push(0xd4200000); // svc #0; brk #0
     return buf;
 }
 
-fn build_trampoline() -> Vec<i64> {
+fn build_trampoline() -> Vec<u32> {
     let mut buf = Vec::new();
-    buf.push(0x52800820 | 0x381f0fe0 << 32);
-    buf.push(0xd2800020 | 0x910003e1 << 32);
-    buf.push(0xd2800022 | 0xd2800808 << 32);
-    buf.push(0xd4000001 | 0x910043ff << 32);
-    buf.push(0xd65f03c0);
+    buf.push(0x52800820u32);
+    buf.push(0x381f0fe0u32);
+    buf.push(0xd2800020u32);
+    buf.push(0x910003e1u32);
+    buf.push(0xd2800022u32);
+    buf.push(0xd2800808u32);
+    buf.push(0xd4000001u32);
+    buf.push(0x910043ffu32);
+    buf.push(0xd65f03c0u32);
     return buf;
+}
+
+fn combine_i32_to_i64(input: Vec<u32>) -> Vec<i64> {
+    input
+        .chunks_exact(2)
+        .map(|chunk| {
+            let low = chunk[0] as i64;
+            let high = chunk[1] as i64;
+
+            // Combine in little-endian order: low 32 bits first, then high 32 bits
+            (high << 32) | (low & 0xFFFFFFFF)
+        })
+        .collect()
 }
