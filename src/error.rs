@@ -88,9 +88,3 @@ pub enum InstrumentError {
     #[error("Failed to mprotect")]
     MprotectFailed(u64),
 }
-
-#[derive(Error, Debug)]
-pub enum InstructionError {
-    #[error("Index out of bounds")]
-    IndexOutOfBounds,
-}

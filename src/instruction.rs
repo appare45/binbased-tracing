@@ -1,5 +1,3 @@
-use crate::error::InstructionError;
-
 #[derive(Clone)]
 pub struct Instructions(Vec<u32>);
 
@@ -18,14 +16,6 @@ impl Instructions {
 
     pub fn get(&self, index: usize) -> Option<u32> {
         self.0.get(index).copied()
-    }
-
-    pub fn set(&mut self, index: usize, inst: u32) -> Result<(), InstructionError> {
-        if index >= self.0.len() {
-            return Err(InstructionError::IndexOutOfBounds);
-        }
-        self.0[index] = inst;
-        Ok(())
     }
 }
 
@@ -70,21 +60,27 @@ impl From<i64> for Instructions {
 
 fn push_registers_to_stack() -> Instructions {
     let mut instructions = Instructions::new();
-    for i in 0..15 {
-        let rt = i * 2;
-        let rt2 = i * 2 + 1;
-        let rn = 31; // sp is index 31 (0b11111)
-        let imm7 = (16 * i) / 8; // Scale the offset by 8
 
-        let instr = 0b1010_1001_00 << 22
-            | (imm7 & 0x7F) << 15
-            | (rt2 & 0x1F) << 10
-            | (rn & 0x1F) << 5
-            | (rt & 0x1F);
-        instructions.push(instr);
+    // Save frame pointer and link register
+    instructions.push(build_stp(29, 30, 31, -32)); // stp x29, x30, [sp, #-32]!
+    // Save x18, x19 for alignment
+    instructions.push(build_stp(18, 19, 31, -16)); // stp x18, x19, [sp, #-16]!
+
+    for i in 0..9 {
+        instructions.push(build_stp(i * 2, i * 2 + 1, 31, -16));
     }
-    instructions.push(0xf9007bfe); // push link register
     instructions
+}
+
+fn build_stp(rt: u32, rt2: u32, rn: u32, imm: i32) -> u32 {
+    let imm7 = ((imm / 8) as u32) & 0x7F;
+    0b1010_1001_10 << 22 | imm7 << 15 | (rt2 & 0x1F) << 10 | (rn & 0x1F) << 5 | (rt & 0x1F)
+}
+
+#[test]
+fn build_stp_test() {
+    assert_eq!(build_stp(0, 1, 31, -16), 0xa9bf07e0);
+    assert_eq!(build_stp(16, 17, 31, -16), 0xa9bf47f0);
 }
 
 pub fn jump_to_abs(target_addr: u64) -> Instructions {
@@ -103,39 +99,61 @@ pub fn jump_to_abs(target_addr: u64) -> Instructions {
 
 fn pop_registers_from_stack() -> Instructions {
     let mut instructions = Instructions::new();
-    for i in 0..15 {
-        let rt = i * 2;
-        let rt2 = i * 2 + 1;
-        let rn = 31; // sp is index 31 (0b11111)
-        let imm7 = (16 * i) / 8; // Scale the offset by 8
-
-        let instr = 0b1010_1001_01 << 22
-            | (imm7 & 0x7F) << 15
-            | (rt2 & 0x1F) << 10
-            | (rn & 0x1F) << 5
-            | (rt & 0x1F);
-        instructions.push(instr);
+    for i in (0..9).rev() {
+        instructions.push(build_ldp(2 * i, 2 * i + 1, 31, 16));
     }
-    instructions.push(0xf9007bfe); // push link register
+
+    // Restore x18, x19
+    instructions.push(build_ldp(18, 19, 31, 16)); // ldp x18, x19, [sp], #16
+    // Restore frame pointer and link register
+    // TODO: 32 to 16
+    instructions.push(build_ldp(29, 30, 31, 32)); // ldp x29, x30, [sp], #32
+
     instructions
 }
 
-pub fn build_trampoline(replaced_addr: u64, inst1: u32, inst2: u32, inst3: u32, inst4: u32) -> Instructions {
+fn build_ldp(rt: u32, rt2: u32, rn: u32, imm: i32) -> u32 {
+    let imm7 = ((imm / 8) as u32) & 0x7F;
+    0b1010_1000_11 << 22 | imm7 << 15 | (rt2 & 0x1F) << 10 | (rn & 0x1F) << 5 | (rt & 0x1F)
+}
+
+#[test]
+fn build_ldp_test() {
+    assert_eq!(build_ldp(16, 17, 31, 16), 0xa8c147f0)
+}
+
+pub fn build_trampoline(
+    replaced_addr: u64,
+    inst1: u32,
+    inst2: u32,
+    inst3: u32,
+    inst4: u32,
+) -> Instructions {
     let mut instructions = Instructions::new();
     instructions.join(push_registers_to_stack());
-    // puts(A)
-    instructions.push(0x52800820u32);
-    instructions.push(0x381f0fe0u32);
-    instructions.push(0xd2800020u32);
-    instructions.push(0x910003e1u32);
-    instructions.push(0xd2800022u32);
-    instructions.push(0xd2800808u32);
-    instructions.push(0xd4000001u32);
-    instructions.push(0x910043ffu32);
-    instructions.push(0xd65f03c0u32);
+
+    // Prepare buffer with 'A' on stack
+    instructions.push(0xd2800820); // mov x0, #0x41 ('A')
+    instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!        (push 'A' to stack with alignment)
+
+    // Setup write(1, sp, 1) syscall
+    instructions.push(0xd2800020); // mov x0, #1      (fd = stdout)
+    instructions.push(0x910003e1); // mov x1, sp      (buf = stack pointer)
+    instructions.push(0xd2800022); // mov x2, #1      (count = 1)
+    instructions.push(0xd2800808); // mov x8, #64     (syscall number for write)
+    instructions.push(0xd4000001); // svc #0          (make syscall)
+
+    // Clean up the buffer from stack
+    instructions.push(0x910043ff); // add sp, sp, #16 (pop the buffer)
+
     instructions.join(pop_registers_from_stack());
-    instructions.push(to_be_replaced);
-    instructions.join(jump_to_abs(replaced_addr));
+
+    // Execute all 4 instructions that were overwritten by jump_to_abs (16 bytes total)
+    instructions.push(inst1);
+    instructions.push(inst2);
+    instructions.push(inst3);
+    instructions.push(inst4);
+
     // Jump to the instruction AFTER the 16 bytes we overwrote
     instructions.join(jump_to_abs(replaced_addr + 16));
 
