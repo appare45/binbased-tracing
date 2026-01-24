@@ -3,8 +3,10 @@ use crate::{error::InstrumentError, proc, ptrace};
 pub enum Instrument {
     NotInstrumented(ptrace::Tracee),
     PreInstrumented(ptrace::Tracee, u64),
-    Instrumented(ptrace::Tracee),
+    Instrumented(proc::Proc),
 }
+
+const TARGET_SYMBOL: &str = "net/http.serverHandler.ServeHTTP";
 
 impl From<ptrace::Tracee> for Instrument {
     fn from(value: ptrace::Tracee) -> Self {
@@ -55,16 +57,16 @@ impl Instrument {
         }
     }
 
-    pub fn instrument(self) -> Result<proc::Proc, InstrumentError> {
+    pub fn instrument(self) -> Result<Instrument, InstrumentError> {
         match self {
-            Instrument::PreInstrumented(tracee, addr) => {
+            Instrument::PreInstrumented(tracee, trampoline_addr) => {
                 let trampoline = build_trampoline();
-                tracee.write(addr, &trampoline)?;
+                tracee.write(trampoline_addr, &trampoline)?;
                 let saved_regs = tracee.get_regs()?;
                 let mut regs = saved_regs.clone();
                 let pc = regs.pc;
                 let args = [
-                    addr,
+                    trampoline_addr,
                     TRAMPOLINE_SIZE,
                     5, // PROT_READ | PROT_EXEC
                 ];
@@ -83,7 +85,13 @@ impl Instrument {
                 }
                 tracee.write(pc, &before)?;
                 tracee.set_regs(saved_regs)?;
-                Ok(tracee.detach()?)
+                // TODO: このあたりを分割
+                let elf = tracee.get_bin().unwrap();
+                let exec_base = tracee.base().unwrap();
+                let (off, _sym) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
+                let target_addr = off + exec_base;
+                println!("{TARGET_SYMBOL} is at 0x{target_addr:x}");
+                Ok(Instrument::Instrumented(tracee.detach()?))
             }
             _ => Err(InstrumentError::NotPreInstrumentd),
         }
@@ -103,6 +111,6 @@ fn build_trampoline() -> Vec<i64> {
     buf.push(0xd2800020 | 0x910003e1 << 32);
     buf.push(0xd2800022 | 0xd2800808 << 32);
     buf.push(0xd4000001 | 0x910043ff << 32);
-    buf.push(0xd4200000);
+    buf.push(0xd65f03c0);
     return buf;
 }

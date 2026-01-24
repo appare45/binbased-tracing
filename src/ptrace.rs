@@ -3,7 +3,7 @@ use nix::{
     sys::{ptrace, signal::Signal, wait},
 };
 
-use crate::{error::PtraceError, proc};
+use crate::{elf, error::PtraceError, proc};
 
 pub enum Tracee {
     Attached(proc::Proc),
@@ -104,6 +104,13 @@ impl Tracee {
         match self {
             Tracee::Attached(proc) => proc.exe_base(),
             Tracee::Stopped(proc) => proc.exe_base(),
+        }
+    }
+
+    pub fn get_bin(&self) -> Result<elf::ELF, crate::error::ElfError> {
+        match self {
+            Tracee::Attached(proc) => proc.get_bin(),
+            Tracee::Stopped(proc) => proc.get_bin(),
         }
     }
 }

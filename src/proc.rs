@@ -17,21 +17,17 @@ use crate::{
 
 pub struct Proc {
     pub pid: unistd::Pid,
-    bin_file: File,
 }
 
 pub fn new(pid: unistd::Pid) -> Result<Proc, ProcError> {
-    let bin_file = File::open(format!("/proc/{pid}/exe")).map_err(ProcError::Exe)?;
-
-    return Ok(Proc { pid, bin_file });
+    return Ok(Proc { pid });
 }
-
 impl Proc {
-    pub fn get_bin(&mut self) -> Result<elf::ELF, crate::error::ElfError> {
+    pub fn get_bin(&self) -> Result<elf::ELF, crate::error::ElfError> {
         let mut buf = Vec::new();
-        self.bin_file
-            .read_to_end(&mut buf)
-            .map_err(|_| crate::error::ElfError::FailedToRead)?;
+        File::open(format!("/proc/{}/exe", self.pid))
+            .map_err(ElfError::IoError)?
+            .read_to_end(&mut buf)?;
         elf::new(&buf)
     }
 
