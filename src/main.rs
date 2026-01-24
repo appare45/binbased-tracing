@@ -57,16 +57,5 @@ fn main() {
     // ここでprocを消費する
     let ptrace = ptrace::Tracee::try_from(proc).unwrap();
     let instrument = instrument::Instrument::from(ptrace);
-    let instrument = instrument.pre_instrument().unwrap();
-
-    // instrumentationが完了したので、プロセスをdetachして実行を継続させる
-    match instrument {
-        instrument::Instrument::PreInstrumented(tracee) => {
-            tracee.detach().unwrap();
-            println!("Process detached successfully");
-        }
-        _ => {
-            eprintln!("Unexpected instrument state");
-        }
-    }
+    let _proc = instrument.pre_instrument().unwrap().instrument().unwrap();
 }

@@ -84,4 +84,10 @@ pub enum InstrumentError {
 
     #[error("Ptrace error")]
     PtraceError(#[from] PtraceError),
+
+    #[error("Not preinstrumentd")]
+    NotPreInstrumentd,
+
+    #[error("Failed to mprotect")]
+    MprotectFailed(u64),
 }
