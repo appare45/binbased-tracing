@@ -93,11 +93,10 @@ impl Tracee {
     pub fn write(
         &self,
         addr: u64,
-        instructions: &instruction::Instructions,
+        val: &Vec<i64>,
     ) -> Result<instruction::Instructions, PtraceError> {
-        let instructions = instructions.raw();
-        let mut saved = Vec::with_capacity(instructions.len());
-        for (i, &instr) in instructions.iter().enumerate() {
+        let mut saved = Vec::with_capacity(val.len());
+        for (i, &instr) in val.iter().enumerate() {
             let offset = (i as u64) * 8;
             saved.push(self.read(addr + offset)?);
             self.write_one(addr + offset, instr)?;
