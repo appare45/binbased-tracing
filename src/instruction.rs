@@ -120,7 +120,7 @@ fn pop_registers_from_stack() -> Instructions {
     instructions
 }
 
-pub fn build_trampoline(replaced_addr: u64, to_be_replaced: u32) -> Instructions {
+pub fn build_trampoline(replaced_addr: u64, inst1: u32, inst2: u32, inst3: u32, inst4: u32) -> Instructions {
     let mut instructions = Instructions::new();
     instructions.join(push_registers_to_stack());
     // puts(A)
@@ -136,5 +136,8 @@ pub fn build_trampoline(replaced_addr: u64, to_be_replaced: u32) -> Instructions
     instructions.join(pop_registers_from_stack());
     instructions.push(to_be_replaced);
     instructions.join(jump_to_abs(replaced_addr));
+    // Jump to the instruction AFTER the 16 bytes we overwrote
+    instructions.join(jump_to_abs(replaced_addr + 16));
+
     return instructions;
 }

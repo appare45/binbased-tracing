@@ -64,10 +64,17 @@ impl Instrument {
                 let (off, _size) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
                 let target_addr = off + exec_base;
                 println!("{TARGET_SYMBOL} is at 0x{target_addr:x}");
-                let target_bin_head = instruction::Instructions::from(tracee.read(target_addr)?);
-                let to_be_replaced = target_bin_head.get(0).unwrap();
 
-                let trampoline = instruction::build_trampoline(target_addr, to_be_replaced);
+                // 4バイト分ずらすので注意！
+                let target_bin1 = instruction::Instructions::from(tracee.read(target_addr)?);
+                let target_bin2 = instruction::Instructions::from(tracee.read(target_addr + 8)?);
+                let inst1 = target_bin1.get(0).unwrap();
+                let inst2 = target_bin1.get(1).unwrap();
+                let inst3 = target_bin2.get(0).unwrap();
+                let inst4 = target_bin2.get(1).unwrap();
+
+                let trampoline =
+                    instruction::build_trampoline(target_addr, inst1, inst2, inst3, inst4);
                 tracee.write(trampoline_addr, &trampoline.into())?;
                 let saved_regs = tracee.get_regs()?;
                 let mut regs = saved_regs.clone();
