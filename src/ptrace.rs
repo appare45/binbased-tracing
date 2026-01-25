@@ -119,4 +119,3 @@ fn wait_for_sigtrap(proc: proc::Proc) -> Result<Stopped, PtraceError> {
         }
     }
 }
-

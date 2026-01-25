@@ -49,6 +49,6 @@ fn main() {
     let proc = c.trace().unwrap();
 
     // ここでprocを消費する
-    let instrument = instrument::Instrument::try_from(proc).unwrap();
-    let _proc = instrument.pre_instrument().unwrap().instrument().unwrap();
+    let instrument = instrument::NotInstrumented::try_from(proc).unwrap();
+    let _proc = instrument.instrument().unwrap();
 }
