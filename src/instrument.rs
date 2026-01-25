@@ -1,16 +1,18 @@
 use crate::{error::InstrumentError, instruction, proc, ptrace};
 
 pub enum Instrument {
-    NotInstrumented(ptrace::Tracee),
-    PreInstrumented(ptrace::Tracee, u64),
+    NotInstrumented(ptrace::Attached),
+    PreInstrumented(ptrace::Stopped, u64),
     Instrumented(proc::Proc),
 }
 
 const TARGET_SYMBOL: &str = "net/http.serverHandler.ServeHTTP";
 
-impl From<ptrace::Tracee> for Instrument {
-    fn from(value: ptrace::Tracee) -> Self {
-        Instrument::NotInstrumented(value)
+impl TryFrom<proc::Proc> for Instrument {
+    type Error = InstrumentError;
+
+    fn try_from(value: proc::Proc) -> Result<Self, Self::Error> {
+        Ok(Instrument::NotInstrumented(value.try_into()?))
     }
 }
 
@@ -25,7 +27,7 @@ impl Instrument {
             Instrument::NotInstrumented(tracee) => {
                 let instructions = build_svc();
 
-                let tracee = tracee.stop()?;
+                let tracee = ptrace::Stopped::try_from(tracee)?;
                 let saved_regs = tracee.get_regs()?;
                 let pc = saved_regs.pc;
                 let mut regs = saved_regs.clone();
@@ -43,9 +45,15 @@ impl Instrument {
                 tracee.set_regs(regs)?;
                 let saved = tracee.write(pc, &instructions.into())?;
 
-                let tracee = tracee.cont()?.wait()?;
-                let addr = tracee.get_regs()?.regs[0];
+                let tracee = ptrace::Attached::try_from(tracee)?.wait()?;
+                let result_regs = tracee.get_regs()?;
+                let addr = result_regs.regs[0];
                 println!("Allocated at 0x{addr:x}");
+                if addr == 0 || (addr as i64) < 0 {
+                    eprintln!("mmap failed! Return value: 0x{:x} ({})", addr, addr as i64);
+                    eprintln!("Syscall might have failed. Check errno.");
+                    return Err(InstrumentError::MmapFailed);
+                }
                 tracee.write(pc, &saved.into())?;
                 tracee.set_regs(saved_regs)?;
 
@@ -59,8 +67,8 @@ impl Instrument {
         match self {
             Instrument::PreInstrumented(tracee, trampoline_addr) => {
                 // ターゲットアドレスを取得
-                let elf = tracee.get_bin().unwrap();
-                let exec_base = tracee.base().unwrap();
+                let elf = tracee.0.get_bin().unwrap();
+                let exec_base = tracee.0.exe_base().unwrap();
                 let (off, _size) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
                 let target_addr = off + exec_base;
                 println!("{TARGET_SYMBOL} is at 0x{target_addr:x}");
@@ -91,8 +99,7 @@ impl Instrument {
                 tracee.set_regs(regs)?;
                 let buf = build_svc();
                 let before = tracee.write(pc, &buf.into())?;
-                let tracee = tracee.cont()?;
-                let tracee = tracee.wait()?;
+                let tracee = ptrace::Attached::try_from(tracee)?.wait()?;
                 match tracee.get_regs()?.regs[0] {
                     code if code != 0 => return Err(InstrumentError::MprotectFailed(code)),
                     _ => (),
@@ -103,7 +110,7 @@ impl Instrument {
                 let patch = instruction::jump_to_abs(trampoline_addr);
                 tracee.write(target_addr, &patch.into())?;
 
-                Ok(Instrument::Instrumented(tracee.detach()?))
+                Ok(Instrument::Instrumented(tracee.try_into()?))
             }
             _ => Err(InstrumentError::NotPreInstrumentd),
         }

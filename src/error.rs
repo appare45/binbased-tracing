@@ -37,9 +37,6 @@ pub enum PtraceError {
     #[error("Attaching failed")]
     AttachFailed(#[source] nix::errno::Errno),
 
-    #[error("Already stopped")]
-    AlreadyStopped,
-
     #[error("Interrupt failed")]
     InterruptFailed(#[source] nix::errno::Errno),
 
@@ -57,9 +54,6 @@ pub enum PtraceError {
 
     #[error("Failed to detach")]
     DetachFailed(#[source] nix::errno::Errno),
-
-    #[error("Process is running")]
-    ProcessRunning,
 
     #[error("Failed to get registers")]
     GetRegistersFailed(#[source] nix::errno::Errno),
@@ -87,4 +81,7 @@ pub enum InstrumentError {
 
     #[error("Failed to mprotect")]
     MprotectFailed(u64),
+
+    #[error("Failed to mmap")]
+    MmapFailed,
 }

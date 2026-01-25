@@ -3,91 +3,45 @@ use nix::{
     sys::{ptrace, signal::Signal, wait},
 };
 
-use crate::{elf, error::PtraceError, instruction, proc};
+use crate::{error::PtraceError, instruction, proc};
 
-pub enum Tracee {
-    Attached(proc::Proc),
-    Stopped(proc::Proc),
-}
+pub struct Attached(pub proc::Proc);
+pub struct Stopped(pub proc::Proc);
 
-impl TryFrom<proc::Proc> for Tracee {
+impl TryFrom<proc::Proc> for Attached {
     type Error = PtraceError;
 
     fn try_from(proc: proc::Proc) -> Result<Self, Self::Error> {
         ptrace::seize(proc.pid, ptrace::Options::empty())
             .map_err(PtraceError::AttachFailed)
-            .map(|_| Tracee::Attached(proc))
+            .map(|_| Attached(proc))
     }
 }
 
-impl Tracee {
-    pub fn stop(self) -> Result<Tracee, PtraceError> {
-        match self {
-            Tracee::Attached(proc) => {
-                ptrace::interrupt(proc.pid).map_err(PtraceError::InterruptFailed)?;
-                Tracee::Attached(proc).wait()
-            }
-            Tracee::Stopped(_) => Err(PtraceError::AlreadyStopped),
-        }
-    }
+impl TryFrom<Attached> for Stopped {
+    type Error = PtraceError;
 
-    pub fn cont(self) -> Result<Tracee, PtraceError> {
-        match self {
-            Tracee::Stopped(proc) => ptrace::cont(proc.pid, None)
-                .map_err(PtraceError::ContinueFailed)
-                .map(|_| Tracee::Attached(proc)),
-            _ => Err(PtraceError::ProcessRunning),
-        }
+    fn try_from(value: Attached) -> Result<Self, Self::Error> {
+        ptrace::interrupt(value.0.pid).map_err(PtraceError::InterruptFailed)?;
+        wait_for_sigtrap(value.0)
     }
+}
 
-    pub fn detach(self) -> Result<proc::Proc, PtraceError> {
-        match self {
-            Tracee::Attached(proc) => detach_proc(proc),
-            Tracee::Stopped(proc) => detach_proc(proc),
-        }
-    }
-
+impl Stopped {
     pub fn get_regs(&self) -> Result<user_regs_struct, PtraceError> {
-        match self {
-            Tracee::Stopped(proc) => {
-                ptrace::getregs(proc.pid).map_err(PtraceError::GetRegistersFailed)
-            }
-            _ => Err(PtraceError::ProcessRunning),
-        }
+        ptrace::getregs(self.0.pid).map_err(PtraceError::GetRegistersFailed)
     }
 
     pub fn set_regs(&self, regs: user_regs_struct) -> Result<(), PtraceError> {
-        match self {
-            Tracee::Stopped(proc) => {
-                ptrace::setregs(proc.pid, regs).map_err(PtraceError::SetRegistersFailed)
-            }
-            _ => Err(PtraceError::ProcessRunning),
-        }
-    }
-
-    pub fn wait(self) -> Result<Tracee, PtraceError> {
-        match self {
-            Tracee::Attached(proc) => wait_for_sigtrap(proc),
-            Tracee::Stopped(_) => Err(PtraceError::AlreadyStopped),
-        }
+        ptrace::setregs(self.0.pid, regs).map_err(PtraceError::SetRegistersFailed)
     }
 
     pub fn read(&self, addr: u64) -> Result<i64, PtraceError> {
-        match self {
-            Tracee::Stopped(proc) => {
-                ptrace::read(proc.pid, addr as *mut c_void).map_err(PtraceError::ReadFailed)
-            }
-            _ => Err(PtraceError::ProcessRunning),
-        }
+        ptrace::read(self.0.pid, addr as *mut c_void).map_err(PtraceError::ReadFailed)
     }
 
     fn write_one(&self, addr: u64, v: i64) -> Result<(), PtraceError> {
-        match self {
-            Tracee::Stopped(proc) => {
-                ptrace::write(proc.pid, addr as *mut c_void, v).map_err(PtraceError::WriteFailed)
-            }
-            _ => Err(PtraceError::ProcessRunning),
-        }
+        ptrace::write(self.0.pid, addr as *mut c_void, v).map_err(PtraceError::WriteFailed)
     }
 
     pub fn write(
@@ -103,30 +57,55 @@ impl Tracee {
         }
         Ok(saved.into())
     }
+}
 
-    pub fn base(&self) -> Option<u64> {
-        match self {
-            Tracee::Attached(proc) => proc.exe_base(),
-            Tracee::Stopped(proc) => proc.exe_base(),
-        }
-    }
+impl TryFrom<Stopped> for Attached {
+    type Error = PtraceError;
 
-    pub fn get_bin(&self) -> Result<elf::ELF, crate::error::ElfError> {
-        match self {
-            Tracee::Attached(proc) => proc.get_bin(),
-            Tracee::Stopped(proc) => proc.get_bin(),
-        }
+    fn try_from(value: Stopped) -> Result<Self, Self::Error> {
+        ptrace::cont(value.0.pid, None)
+            .map_err(PtraceError::ContinueFailed)
+            .map(|_| Attached(value.0))
     }
 }
 
-fn wait_for_sigtrap(proc: proc::Proc) -> Result<Tracee, PtraceError> {
+impl Attached {
+    /// Continue execution and wait for SIGTRAP
+    pub fn wait(self) -> Result<Stopped, PtraceError> {
+        wait_for_sigtrap(self.0)
+    }
+}
+
+impl TryInto<proc::Proc> for Attached {
+    type Error = PtraceError;
+
+    fn try_into(self) -> Result<proc::Proc, Self::Error> {
+        detach(self.0)
+    }
+}
+
+impl TryInto<proc::Proc> for Stopped {
+    type Error = PtraceError;
+
+    fn try_into(self) -> Result<proc::Proc, Self::Error> {
+        detach(self.0)
+    }
+}
+
+fn detach(proc: proc::Proc) -> Result<proc::Proc, PtraceError> {
+    ptrace::detach(proc.pid, None)
+        .map_err(PtraceError::DetachFailed)
+        .map(|_| proc)
+}
+
+fn wait_for_sigtrap(proc: proc::Proc) -> Result<Stopped, PtraceError> {
     loop {
         match wait::waitpid(proc.pid, None).map_err(PtraceError::WaitPIDFailed)? {
             wait::WaitStatus::PtraceEvent(_, Signal::SIGTRAP, _) => {
-                return Ok(Tracee::Stopped(proc));
+                return Ok(Stopped(proc));
             }
             wait::WaitStatus::Stopped(_, Signal::SIGTRAP) => {
-                return Ok(Tracee::Stopped(proc));
+                return Ok(Stopped(proc));
             }
             wait::WaitStatus::Stopped(_, sig) => {
                 eprintln!(
@@ -141,8 +120,3 @@ fn wait_for_sigtrap(proc: proc::Proc) -> Result<Tracee, PtraceError> {
     }
 }
 
-fn detach_proc(proc: proc::Proc) -> Result<proc::Proc, PtraceError> {
-    ptrace::detach(proc.pid, None)
-        .map_err(PtraceError::DetachFailed)
-        .map(|_| proc)
-}
