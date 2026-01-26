@@ -25,6 +25,8 @@ enum Commands {
     Exec { path: String, args: Vec<String> },
 }
 
+const TARGET_SYMBOL: &str = "net/http.serverHandler.ServeHTTP";
+
 #[cfg(not(target_arch = "aarch64"))]
 compile_error!("This crate only supports aarch64 architecture");
 
@@ -48,7 +50,14 @@ fn main() {
     };
     let proc = c.trace().unwrap();
 
+    // ターゲットアドレスを取得
+    let elf = proc.get_bin().unwrap();
+    let exec_base = proc.exe_base().unwrap();
+    let (off, _size) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
+    let target_addr = off + exec_base;
+    println!("{TARGET_SYMBOL} is at 0x{target_addr:x}");
+
     // ここでprocを消費する
-    let instrument = instrument::NotInstrumented::try_from(proc).unwrap();
+    let instrument = instrument::new(proc, target_addr).unwrap();
     let _proc = instrument.instrument().unwrap();
 }

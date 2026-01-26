@@ -1,23 +1,48 @@
 use crate::{error::InstrumentError, instruction, proc, ptrace};
 
 const TRAMPOLINE_SIZE: u64 = 1024;
-const TARGET_SYMBOL: &str = "net/http.serverHandler.ServeHTTP";
 
-pub struct NotInstrumented(ptrace::Attached);
-struct TrampolineAllocating(ptrace::Stopped);
-struct TrampolineAllocated(ptrace::Attached, u64); // u64はトランポリンアドレス
-struct TrampolineWriting(ptrace::Stopped, u64, u64); // (stopped, trampoline_addr, target_addr)
-struct TrampolineWrote(ptrace::Attached, u64, u64); // (attached, trampoline_addr, target_addr)
-struct TrampolinePermissionChanging(ptrace::Stopped, u64, u64);
-struct TrampolinePermissionChanged(ptrace::Attached, u64, u64);
+pub struct NotInstrumented {
+    tracee: ptrace::Attached,
+    target_addr: u64,
+}
+struct TrampolineAllocating {
+    tracee: ptrace::Stopped,
+    target_addr: u64,
+}
+struct TrampolineAllocated {
+    tracee: ptrace::Attached,
+    trampoline_addr: u64,
+    target_addr: u64,
+}
+struct TrampolineWriting {
+    tracee: ptrace::Stopped,
+    trampoline_addr: u64,
+    target_addr: u64,
+}
+struct TrampolineWrote {
+    tracee: ptrace::Attached,
+    trampoline_addr: u64,
+    target_addr: u64,
+}
 
-impl TryFrom<proc::Proc> for NotInstrumented {
-    type Error = InstrumentError;
+struct TrampolinePermissionChanging {
+    tracee: ptrace::Stopped,
+    trampoline_addr: u64,
+    target_addr: u64,
+}
+struct TrampolinePermissionChanged {
+    tracee: ptrace::Attached,
+    trampoline_addr: u64,
+    target_addr: u64,
+}
 
-    fn try_from(value: proc::Proc) -> Result<Self, Self::Error> {
-        let attached = ptrace::Attached::try_from(value)?;
-        Ok(NotInstrumented(attached))
-    }
+pub fn new(value: proc::Proc, target_addr: u64) -> Result<NotInstrumented, InstrumentError> {
+    let ptrace = ptrace::Attached::try_from(value)?;
+    Ok(NotInstrumented {
+        tracee: ptrace,
+        target_addr,
+    })
 }
 
 impl NotInstrumented {
@@ -38,8 +63,11 @@ impl TryFrom<NotInstrumented> for TrampolineAllocating {
     type Error = InstrumentError;
 
     fn try_from(value: NotInstrumented) -> Result<Self, Self::Error> {
-        let stopped = ptrace::Stopped::try_from(value.0)?;
-        Ok(TrampolineAllocating(stopped))
+        let ptrace = ptrace::Stopped::try_from(value.tracee)?;
+        Ok(TrampolineAllocating {
+            tracee: ptrace,
+            target_addr: value.target_addr,
+        })
     }
 }
 
@@ -48,7 +76,7 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
 
     fn try_from(value: TrampolineAllocating) -> Result<Self, Self::Error> {
         // mmapシステムコールを実行してトランポリン領域を確保
-        let tracee = value.0;
+        let tracee = value.tracee;
         let saved_regs = tracee.get_regs()?;
         let pc = saved_regs.pc;
         let mut regs = saved_regs.clone();
@@ -72,11 +100,14 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
         // システムコール実行
         let tracee = ptrace::Attached::try_from(tracee)?.wait()?;
         let result_regs = tracee.get_regs()?;
-        let addr = result_regs.regs[0];
+        let trampoline_addr = result_regs.regs[0];
 
-        println!("Allocated at 0x{addr:x}");
-        if addr == 0 || (addr as i64) < 0 {
-            eprintln!("mmap failed! Return value: 0x{:x} ({})", addr, addr as i64);
+        println!("Allocated at 0x{trampoline_addr:x}");
+        if trampoline_addr == 0 || (trampoline_addr as i64) < 0 {
+            eprintln!(
+                "mmap failed! Return value: 0x{:x} ({})",
+                trampoline_addr, trampoline_addr as i64
+            );
             eprintln!("Syscall might have failed. Check errno.");
             return Err(InstrumentError::MmapFailed);
         }
@@ -85,10 +116,11 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
         tracee.write(pc, &saved.into())?;
         tracee.set_regs(saved_regs)?;
 
-        Ok(TrampolineAllocated(
-            ptrace::Attached::try_from(tracee)?,
-            addr,
-        ))
+        Ok(TrampolineAllocated {
+            tracee: ptrace::Attached::try_from(tracee)?,
+            trampoline_addr,
+            target_addr: value.target_addr,
+        })
     }
 }
 
@@ -96,15 +128,9 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
     type Error = InstrumentError;
 
     fn try_from(value: TrampolineAllocated) -> Result<Self, Self::Error> {
-        let tracee = ptrace::Stopped::try_from(value.0)?;
-        let trampoline_addr = value.1;
-
-        // ターゲットアドレスを取得
-        let elf = tracee.0.get_bin().unwrap();
-        let exec_base = tracee.0.exe_base().unwrap();
-        let (off, _size) = elf.get_symbol(TARGET_SYMBOL.into()).unwrap();
-        let target_addr = off + exec_base;
-        println!("{TARGET_SYMBOL} is at 0x{target_addr:x}");
+        let tracee = ptrace::Stopped::try_from(value.tracee)?;
+        let trampoline_addr = value.trampoline_addr;
+        let target_addr = value.target_addr;
 
         // 4バイト分ずらすので注意！
         let target_bin1 = instruction::Instructions::from(tracee.read(target_addr)?);
@@ -118,7 +144,11 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
         let trampoline = instruction::build_trampoline(target_addr, inst1, inst2, inst3, inst4);
         tracee.write(trampoline_addr, &trampoline.into())?;
 
-        Ok(TrampolineWriting(tracee, trampoline_addr, target_addr))
+        Ok(TrampolineWriting {
+            tracee,
+            trampoline_addr,
+            target_addr,
+        })
     }
 }
 
@@ -126,8 +156,12 @@ impl TryFrom<TrampolineWriting> for TrampolineWrote {
     type Error = InstrumentError;
 
     fn try_from(value: TrampolineWriting) -> Result<Self, Self::Error> {
-        let tracee = ptrace::Attached::try_from(value.0)?;
-        Ok(TrampolineWrote(tracee, value.1, value.2))
+        let tracee = ptrace::Attached::try_from(value.tracee)?;
+        Ok(TrampolineWrote {
+            tracee,
+            trampoline_addr: value.trampoline_addr,
+            target_addr: value.target_addr,
+        })
     }
 }
 
@@ -135,8 +169,12 @@ impl TryFrom<TrampolineWrote> for TrampolinePermissionChanging {
     type Error = InstrumentError;
 
     fn try_from(value: TrampolineWrote) -> Result<Self, Self::Error> {
-        let tracee = ptrace::Stopped::try_from(value.0)?;
-        Ok(TrampolinePermissionChanging(tracee, value.1, value.2))
+        let tracee = ptrace::Stopped::try_from(value.tracee)?;
+        Ok(TrampolinePermissionChanging {
+            tracee,
+            target_addr: value.target_addr,
+            trampoline_addr: value.trampoline_addr,
+        })
     }
 }
 
@@ -144,9 +182,9 @@ impl TryFrom<TrampolinePermissionChanging> for TrampolinePermissionChanged {
     type Error = InstrumentError;
 
     fn try_from(value: TrampolinePermissionChanging) -> Result<Self, Self::Error> {
-        let tracee = value.0;
-        let trampoline_addr = value.1;
-        let target_addr = value.2;
+        let tracee = value.tracee;
+        let trampoline_addr = value.trampoline_addr;
+        let target_addr = value.target_addr;
 
         // mprotectシステムコールでトランポリンを実行可能にする
         let saved_regs = tracee.get_regs()?;
@@ -178,11 +216,11 @@ impl TryFrom<TrampolinePermissionChanging> for TrampolinePermissionChanged {
         tracee.write(pc, &before.into())?;
         tracee.set_regs(saved_regs)?;
 
-        Ok(TrampolinePermissionChanged(
-            ptrace::Attached::try_from(tracee)?,
+        Ok(TrampolinePermissionChanged {
+            tracee: ptrace::Attached::try_from(tracee)?,
             trampoline_addr,
             target_addr,
-        ))
+        })
     }
 }
 
@@ -190,9 +228,9 @@ impl TryFrom<TrampolinePermissionChanged> for proc::Proc {
     type Error = InstrumentError;
 
     fn try_from(value: TrampolinePermissionChanged) -> Result<Self, Self::Error> {
-        let tracee = ptrace::Stopped::try_from(value.0)?;
-        let trampoline_addr = value.1;
-        let target_addr = value.2;
+        let tracee = ptrace::Stopped::try_from(value.tracee)?;
+        let trampoline_addr = value.trampoline_addr;
+        let target_addr = value.target_addr;
 
         // ターゲットアドレスに絶対ジャンプを書き込み
         let patch = instruction::jump_to_abs(trampoline_addr);
