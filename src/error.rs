@@ -81,6 +81,9 @@ pub enum InstrumentError {
 
     #[error("Failed to mmap")]
     MmapFailed,
+
+    #[error("String is not available")]
+    StringIsNotAvailable(#[from] std::ffi::NulError),
 }
 
 #[derive(Error, Debug)]

@@ -44,11 +44,12 @@ impl Stopped {
         ptrace::write(self.0.pid, addr as *mut c_void, v).map_err(PtraceError::WriteFailed)
     }
 
-    pub fn write(
+    pub fn write_instructions(
         &self,
         addr: u64,
-        val: &Vec<i64>,
+        val: instruction::Instructions,
     ) -> Result<instruction::Instructions, PtraceError> {
+        let val: Vec<i64> = val.into();
         let mut saved = Vec::with_capacity(val.len());
         for (i, &instr) in val.iter().enumerate() {
             let offset = (i as u64) * 8;
@@ -56,6 +57,17 @@ impl Stopped {
             self.write_one(addr + offset, instr)?;
         }
         Ok(saved.into())
+    }
+
+    pub fn write_bytes(&self, addr: u64, data: &[u8]) -> Result<(), PtraceError> {
+        for (i, chunk) in data.chunks(8).enumerate() {
+            let mut buf = [0u8; 8];
+            buf[..chunk.len()].copy_from_slice(chunk);
+            let value = i64::from_le_bytes(buf);
+            let offset = (i as u64) * 8;
+            self.write_one(addr + offset, value)?;
+        }
+        Ok(())
     }
 }
 

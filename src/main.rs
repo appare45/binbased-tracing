@@ -68,10 +68,9 @@ fn main() {
     let target_addr = off + exec_base;
     println!("{TARGET_SYMBOL} is at 0x{target_addr:x}");
 
-    let _pipe = pipe::Pipe::new(TARGET_SYMBOL, proc.pid).expect("Failed to create pipe");
+    let pipe = pipe::Pipe::new(TARGET_SYMBOL, proc.pid).expect("Failed to create pipe");
 
-    // ここでprocを消費する
-    let instrument = instrument::new(proc, target_addr).expect("Failed to start instrument");
+    let instrument = instrument::new(proc, target_addr, pipe).expect("Failed to start instrument");
     let proc = instrument.instrument().expect("Failed to instrument");
     loop {
         match proc.wait_for_status() {

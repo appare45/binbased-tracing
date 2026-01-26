@@ -20,6 +20,10 @@ impl Pipe {
         println!("Created pipe on {path:?}");
         Ok(Self { path })
     }
+
+    pub fn path(&self) -> &str {
+        self.path.to_str().unwrap_or("")
+    }
 }
 
 impl Drop for Pipe {
