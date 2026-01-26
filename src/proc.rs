@@ -3,7 +3,7 @@ use std::{
     io::{BufReader, Read},
 };
 
-use nix::unistd;
+use nix::{sys::wait, unistd};
 
 use crate::{
     elf,
@@ -42,6 +42,10 @@ impl Proc {
             .ok()?
             .find(|m| m.executable)
             .map(|m| m.address.0)
+    }
+
+    pub fn wait_for_status(&self) -> Result<wait::WaitStatus, ProcError> {
+        wait::waitpid(self.pid, None).map_err(ProcError::FailedToWaitPid)
     }
 }
 

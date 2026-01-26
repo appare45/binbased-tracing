@@ -6,6 +6,9 @@ use thiserror::Error;
 pub enum ProcError {
     #[error("proc's exe file is not available")]
     FailedToGetStatus(#[source] io::Error),
+
+    #[error("Failed to waitpid")]
+    FailedToWaitPid(#[source] nix::errno::Errno),
 }
 
 #[derive(Error, Debug)]
@@ -78,4 +81,13 @@ pub enum InstrumentError {
 
     #[error("Failed to mmap")]
     MmapFailed,
+}
+
+#[derive(Error, Debug)]
+pub enum PipeError {
+    #[error("Failed to make fifo")]
+    FailedToMkfifo(#[source] nix::errno::Errno),
+
+    #[error("Failed to create enclosing directory")]
+    FailedToCreateDirectory(#[source] std::io::Error),
 }
