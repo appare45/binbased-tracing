@@ -6,53 +6,56 @@ const TRAMPOLINE_SIZE: u64 = 1024;
 pub struct NotInstrumented {
     tracee: ptrace::Attached,
     target_addr: u64,
-    pipe: pipe::Pipe,
+    pipe_path: String,
 }
+
 struct TrampolineAllocating {
     tracee: ptrace::Stopped,
     target_addr: u64,
-    pipe: pipe::Pipe,
+    pipe_path: String,
 }
+
 struct TrampolineAllocated {
     tracee: ptrace::Attached,
+    target_addr: u64,
     trampoline_exec_addr: u64,
     trampoline_stack_addr: u64,
-    target_addr: u64,
-    #[allow(dead_code)]
-    pipe: pipe::Pipe,
 }
+
 struct TrampolineWriting {
     tracee: ptrace::Stopped,
-    trampoline_addr: u64,
     target_addr: u64,
+    trampoline_addr: u64,
 }
+
 struct TrampolineWrote {
     tracee: ptrace::Attached,
-    trampoline_addr: u64,
     target_addr: u64,
+    trampoline_addr: u64,
 }
 
 struct TrampolinePermissionChanging {
     tracee: ptrace::Stopped,
-    trampoline_addr: u64,
     target_addr: u64,
+    trampoline_addr: u64,
 }
+
 struct TrampolinePermissionChanged {
     tracee: ptrace::Attached,
-    trampoline_addr: u64,
     target_addr: u64,
+    trampoline_addr: u64,
 }
 
 pub fn new(
     value: proc::Proc,
     target_addr: u64,
-    pipe: pipe::Pipe,
+    pipe: &pipe::Pipe,
 ) -> Result<NotInstrumented, InstrumentError> {
-    let ptrace = ptrace::Attached::try_from(value)?;
+    let tracee = ptrace::Attached::try_from(value)?;
     Ok(NotInstrumented {
-        tracee: ptrace,
+        tracee,
         target_addr,
-        pipe,
+        pipe_path: pipe.path().to_string(),
     })
 }
 
@@ -74,11 +77,10 @@ impl TryFrom<NotInstrumented> for TrampolineAllocating {
     type Error = InstrumentError;
 
     fn try_from(value: NotInstrumented) -> Result<Self, Self::Error> {
-        let ptrace = ptrace::Stopped::try_from(value.tracee)?;
-        Ok(TrampolineAllocating {
-            tracee: ptrace,
+        Ok(Self {
+            tracee: ptrace::Stopped::try_from(value.tracee)?,
             target_addr: value.target_addr,
-            pipe: value.pipe,
+            pipe_path: value.pipe_path,
         })
     }
 }
@@ -136,16 +138,17 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
         let (tracee, trampoline_exec_addr) = call_mmap(tracee, TRAMPOLINE_SIZE, 3)?; // PROT_READ | PROT_WRITE
 
         let tracee = ptrace::Stopped::try_from(tracee)?;
+
+        // 別々で確保することで衝突しないようになっている
         let (tracee, trampoline_stack_addr) = call_mmap(tracee, TRAMPOLINE_SIZE, 3)?; // PROT_READ | PROT_WRITE
 
-        let binding = CString::new(value.pipe.path())?;
+        let binding = CString::new(value.pipe_path.as_str())?;
         let fifo_path = binding.as_bytes_with_nul();
 
         let tracee = ptrace::Stopped::try_from(tracee)?;
         println!(
             "Writing pipe path to 0x{:x}: {:?}",
-            trampoline_stack_addr,
-            value.pipe.path()
+            trampoline_stack_addr, value.pipe_path
         );
         tracee.write_bytes(trampoline_stack_addr, fifo_path)?;
         println!(
@@ -156,11 +159,10 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
         );
 
         Ok(TrampolineAllocated {
-            tracee: ptrace::Attached::try_from(tracee)?,
-            trampoline_exec_addr,
+            tracee: tracee.try_into()?,
             target_addr: value.target_addr,
+            trampoline_exec_addr,
             trampoline_stack_addr,
-            pipe: value.pipe,
         })
     }
 }
@@ -195,8 +197,8 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
 
         Ok(TrampolineWriting {
             tracee,
-            trampoline_addr: trampoline_exe_addr,
             target_addr,
+            trampoline_addr: trampoline_exe_addr,
         })
     }
 }
@@ -205,11 +207,10 @@ impl TryFrom<TrampolineWriting> for TrampolineWrote {
     type Error = InstrumentError;
 
     fn try_from(value: TrampolineWriting) -> Result<Self, Self::Error> {
-        let tracee = ptrace::Attached::try_from(value.tracee)?;
         Ok(TrampolineWrote {
-            tracee,
-            trampoline_addr: value.trampoline_addr,
+            tracee: ptrace::Attached::try_from(value.tracee)?,
             target_addr: value.target_addr,
+            trampoline_addr: value.trampoline_addr,
         })
     }
 }
@@ -218,9 +219,8 @@ impl TryFrom<TrampolineWrote> for TrampolinePermissionChanging {
     type Error = InstrumentError;
 
     fn try_from(value: TrampolineWrote) -> Result<Self, Self::Error> {
-        let tracee = ptrace::Stopped::try_from(value.tracee)?;
         Ok(TrampolinePermissionChanging {
-            tracee,
+            tracee: ptrace::Stopped::try_from(value.tracee)?,
             target_addr: value.target_addr,
             trampoline_addr: value.trampoline_addr,
         })
@@ -267,8 +267,8 @@ impl TryFrom<TrampolinePermissionChanging> for TrampolinePermissionChanged {
 
         Ok(TrampolinePermissionChanged {
             tracee: ptrace::Attached::try_from(tracee)?,
-            trampoline_addr,
             target_addr,
+            trampoline_addr: value.trampoline_addr,
         })
     }
 }

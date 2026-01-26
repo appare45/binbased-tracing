@@ -122,7 +122,50 @@ fn build_ldp_test() {
     assert_eq!(build_ldp(16, 17, 31, 16), 0xa8c147f0)
 }
 
+fn build_large_mov(target: u32, value: u64) -> Instructions {
+    let mut instructions = Instructions::new();
+    let mut first = true;
+
+    for shift in (0..64).step_by(16) {
+        let chunk = ((value >> shift) & 0xFFFF) as u32;
+        if chunk == 0 && !first {
+            continue;
+        }
+
+        if first {
+            instructions.push(build_movz(target, chunk, shift as u32));
+            first = false;
+        } else {
+            instructions.push(build_movk(target, chunk, shift as u32));
+        }
+    }
+
+    instructions
+}
+
+fn build_movz(target: u32, value: u32, shift: u32) -> u32 {
+    0b110100101 << 23 | ((shift / 16) & 0b11) << 21 | ((value & 0xFFFF) << 5) | (target & 0x1F)
+}
+
+fn build_movk(target: u32, value: u32, shift: u32) -> u32 {
+    0b111100101 << 23 | ((shift / 16) & 0b11) << 21 | ((value & 0xFFFF) << 5) | (target & 0x1F)
+}
+
+#[test]
+fn build_movz_test() {
+    assert_eq!(build_movz(0, 0xffff, 0), 0xd29fffe0);
+    assert_eq!(build_movz(0, 0x8b0f, 16), 0xd2b161e0);
+    assert_eq!(build_movz(8, 0x40, 0), 0xd2800808)
+}
+
+#[test]
+fn build_movk_test() {
+    assert_eq!(build_movk(0, 0xffff, 0), 0xf29fffe0);
+    assert_eq!(build_movk(0, 0x8b0f, 16), 0xf2b161e0);
+}
+
 pub fn build_trampoline(
+    fifo_path_addr: u64,
     replaced_addr: u64,
     inst1: u32,
     inst2: u32,
@@ -132,19 +175,31 @@ pub fn build_trampoline(
     let mut instructions = Instructions::new();
     instructions.join(push_registers_to_stack());
 
-    // Prepare buffer with 'A' on stack
-    instructions.push(0xd2800820); // mov x0, #0x41 ('A')
-    instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!        (push 'A' to stack with alignment)
+    // openat(-100, stack_addr, O_WRONLY)
+    // x0: dirfd = AT_FDCWD = -100 (0xFFFFFFFFFFFFFF9C)
+    instructions.join(build_large_mov(0, 0xFFFFFFFFFFFFFF9C));
+    // x1: pathname (FIFOパス)
+    instructions.join(build_large_mov(1, fifo_path_addr));
+    // x2: flags = O_WRONLY = 1
+    instructions.push(build_movz(2, 1, 0));
+    // x8: syscall number = openat = 56
+    instructions.push(build_movz(8, 56, 0));
+    instructions.push(0xd4000001); // svc #0          (make syscall)
+    instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!        スタックにx0を保存
+
+    // x0に現在の時刻を保存
+    instructions.push(0xd53be040); // mrs     x0, cntvct_el0
+    instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!        スタックにx0を保存
 
     // Setup write(1, sp, 1) syscall
-    instructions.push(0xd2800020); // mov x0, #1      (fd = stdout)
-    instructions.push(0x910003e1); // mov x1, sp      (buf = stack pointer)
-    instructions.push(0xd2800022); // mov x2, #1      (count = 1)
+    instructions.push(build_movz(1, 31, 0)); // mov x1, sp      
+    instructions.push(build_movz(0, 31, 0)); // mov x0, sp      
+    instructions.push(0xd2800022); // mov x2, #8      (count = 8)
     instructions.push(0xd2800808); // mov x8, #64     (syscall number for write)
     instructions.push(0xd4000001); // svc #0          (make syscall)
 
     // Clean up the buffer from stack
-    instructions.push(0x910043ff); // add sp, sp, #16 (pop the buffer)
+    instructions.push(0x910083ff); // add sp, sp, #32(pop the buffer)
 
     instructions.join(pop_registers_from_stack());
 
