@@ -1,5 +1,6 @@
-use crate::{error::InstrumentError, instruction, proc, ptrace};
+use crate::{error::InstrumentError, instruction, pipe, proc, ptrace, symbol_analyzer};
 use std::ffi::CString;
+use std::thread::JoinHandle;
 
 const TRAMPOLINE_SIZE: u64 = 1024;
 const SYSCALL_MMAP: u64 = 222;
@@ -10,6 +11,44 @@ pub struct InstrumentTarget {
     pub addr: u64,
     pub builder: Box<dyn instruction::TrampolineBuilder>,
     pub pipe_path: String,
+}
+
+pub struct InstrumentationPlan {
+    pub targets: Vec<InstrumentTarget>,
+    pub pipes: Vec<pipe::Pipe>,
+    pub readers: Vec<JoinHandle<u64>>,
+}
+
+pub fn plan_instrumentation(
+    proc: &proc::Proc,
+    analysis: &symbol_analyzer::FunctionAnalysis,
+    symbol_name: &str,
+) -> Result<InstrumentationPlan, InstrumentError> {
+    let pipe_entry = pipe::Pipe::new(symbol_name, proc.pid, Some("entry"))?;
+    let reader_entry = pipe_entry.start_reader();
+
+    let pipe_end = pipe::Pipe::new(symbol_name, proc.pid, Some("end"))?;
+    let reader_end = pipe_end.start_reader();
+
+    let mut targets = vec![InstrumentTarget {
+        addr: analysis.entry_addr,
+        builder: Box::new(instruction::EntryTrampolineBuilder()),
+        pipe_path: pipe_entry.path().to_string(),
+    }];
+
+    for ret_addr in &analysis.ret_addrs {
+        targets.push(InstrumentTarget {
+            addr: *ret_addr,
+            builder: Box::new(instruction::EntryTrampolineBuilder()),
+            pipe_path: pipe_end.path().to_string(),
+        });
+    }
+
+    Ok(InstrumentationPlan {
+        targets,
+        pipes: vec![pipe_entry, pipe_end],
+        readers: vec![reader_entry, reader_end],
+    })
 }
 
 pub struct NotInstrumented {

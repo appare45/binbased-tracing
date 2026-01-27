@@ -90,6 +90,9 @@ pub enum InstrumentError {
 
     #[error("Failed to convert u64 into u32")]
     Overflow(#[from] std::num::TryFromIntError),
+
+    #[error("Pipe error")]
+    PipeError(#[from] PipeError),
 }
 
 #[derive(Error, Debug)]
