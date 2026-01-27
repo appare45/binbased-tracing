@@ -41,6 +41,7 @@ compile_error!("This crate only supports aarch64 architecture");
 
 #[cfg(target_arch = "aarch64")]
 fn main() {
+    let mut is_child_processs = false;
     let c = match Cli::parse().command {
         Commands::Attach { pid } => {
             println!(
@@ -59,6 +60,7 @@ fn main() {
                 .spawn()
                 .expect("Failed to spawn child process")
                 .id();
+            is_child_processs = true;
             conf::new(nix::unistd::Pid::from_raw(pid as i32), true)
         }
     };
@@ -144,8 +146,10 @@ fn main() {
                 status => println!("{status:?}"),
             },
             Err(err) => {
-                println!("{err:?}");
-                break;
+                if is_child_processs {
+                    println!("{err:?}");
+                    break;
+                }
             }
         };
     }

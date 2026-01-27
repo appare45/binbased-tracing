@@ -61,7 +61,7 @@ pub fn new(
 
 impl NotInstrumented {
     pub fn instrument(self) -> Result<proc::Proc, InstrumentError> {
-        // NotInstrumented → ... → Proc の完全な遷移
+        // NotInstrumented → ... → Proc の遷移
         let allocating = TrampolineAllocating::try_from(self)?;
         let allocated = TrampolineAllocated::try_from(allocating)?;
         let writing = TrampolineWriting::try_from(allocated)?;
