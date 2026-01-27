@@ -76,14 +76,16 @@ fn main() {
     let target_addr = off + exec_base;
     println!("{TARGET_SYMBOL} is at 0x{target_addr:x}");
 
-    let pipe = pipe::Pipe::new(TARGET_SYMBOL, proc.pid).expect("Failed to create pipe");
+    let pipe_entry =
+        pipe::Pipe::new(TARGET_SYMBOL, proc.pid, Some("entry")).expect("Failed to create pipe");
 
-    let pipe_path = pipe.path().to_string();
+    let pipe_path = pipe_entry.path().to_string();
     let reader_thread = thread::spawn(move || {
         println!(
             "Pipe reader thread started, waiting for data from: {}",
             pipe_path
         );
+
         let fd = loop {
             match open(pipe_path.as_str(), OFlag::O_RDONLY, Mode::empty()) {
                 Ok(fd) => break fd,
@@ -95,6 +97,7 @@ fn main() {
         };
 
         println!("Pipe opened successfully in non-blocking mode");
+
         let mut file = unsafe { File::from_raw_fd(fd.as_raw_fd()) };
         let mut counter = 0u64;
         let mut buffer = vec![0u8; 0];
@@ -131,7 +134,13 @@ fn main() {
         println!("Pipe reader thread exiting after {} entries", counter);
     });
 
-    let instrument = instrument::new(proc, target_addr, &pipe).expect("Failed to start instrument");
+    let targets = vec![instrument::InstrumentTarget {
+        addr: target_addr,
+        builder: Box::new(instruction::EntryTrampolineBuilder()),
+        pipe_path: pipe_entry.path().to_string(),
+    }];
+
+    let instrument = instrument::new(proc, targets).expect("Failed to start instrument");
     let proc = instrument.instrument().expect("Failed to instrument");
 
     println!("Instrumentation complete. Waiting for program events...");
@@ -154,6 +163,6 @@ fn main() {
         };
     }
     println!("Waiting for pipe reader thread to finish...");
-    drop(pipe); // パイプをクローズしてリーダーを終了させる
+    drop(pipe_entry); // パイプをクローズしてリーダーを終了させる
     let _ = reader_thread.join();
 }

@@ -151,40 +151,57 @@ fn build_movk_test() {
     assert_eq!(build_movk(0, 0x8b0f, 16), 0xf2b161e0);
 }
 
-pub fn build_trampoline(
-    pipe_fd: u32,
-    replaced_addr: u64,
-    inst1: u32,
-    inst2: u32,
-    inst3: u32,
-    inst4: u32,
-) -> Instructions {
-    let mut instructions = Instructions::new();
-    instructions.join(push_registers_to_stack());
+pub trait TrampolineBuilder {
+    fn build(
+        &self,
+        pipe_fd: u32,
+        replaced_addr: u64,
+        inst1: u32,
+        inst2: u32,
+        inst3: u32,
+        inst4: u32,
+    ) -> Instructions;
+}
 
-    // タイムスタンプを取得してスタックに保存
-    instructions.push(0xd53be040); // mrs x0, cntvct_el0
-    instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!
+pub struct EntryTrampolineBuilder();
 
-    // write(fd, sp, 8) - タイムスタンプをパイプに書き込む
-    instructions.push(build_movz(0, pipe_fd, 0));
-    instructions.push(0x910003e1); // mov x1, sp (タイムスタンプのアドレス)
-    instructions.push(build_movz(2, 8, 0)); // x2 = 8
-    instructions.push(build_movz(8, 64, 0)); // x8 = write
-    instructions.push(0xd4000001); // svc #0
+impl TrampolineBuilder for EntryTrampolineBuilder {
+    fn build(
+        &self,
+        pipe_fd: u32,
+        replaced_addr: u64,
+        inst1: u32,
+        inst2: u32,
+        inst3: u32,
+        inst4: u32,
+    ) -> Instructions {
+        let mut instructions = Instructions::new();
+        instructions.join(push_registers_to_stack());
 
-    // スタックをクリーンアップ (timestamp = 16バイト)
-    instructions.push(0x910043ff); // add sp, sp, #16
-    instructions.join(pop_registers_from_stack());
+        // タイムスタンプを取得してスタックに保存
+        instructions.push(0xd53be040); // mrs x0, cntvct_el0
+        instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!
 
-    // Execute all 4 instructions that were overwritten by jump_to_abs (16 bytes total)
-    instructions.push(inst1);
-    instructions.push(inst2);
-    instructions.push(inst3);
-    instructions.push(inst4);
+        // write(fd, sp, 8) - タイムスタンプをパイプに書き込む
+        instructions.push(build_movz(0, pipe_fd, 0));
+        instructions.push(0x910003e1); // mov x1, sp (タイムスタンプのアドレス)
+        instructions.push(build_movz(2, 8, 0)); // x2 = 8
+        instructions.push(build_movz(8, 64, 0)); // x8 = write
+        instructions.push(0xd4000001); // svc #0
 
-    // Jump to the instruction AFTER the 16 bytes we overwrote
-    instructions.join(jump_to_abs(replaced_addr + 16));
+        // スタックをクリーンアップ (timestamp = 16バイト)
+        instructions.push(0x910043ff); // add sp, sp, #16
+        instructions.join(pop_registers_from_stack());
 
-    return instructions;
+        // Execute all 4 instructions that were overwritten by jump_to_abs (16 bytes total)
+        instructions.push(inst1);
+        instructions.push(inst2);
+        instructions.push(inst3);
+        instructions.push(inst4);
+
+        // Jump to the instruction AFTER the 16 bytes we overwrote
+        instructions.join(jump_to_abs(replaced_addr + 16));
+
+        return instructions;
+    }
 }

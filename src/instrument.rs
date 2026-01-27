@@ -1,64 +1,65 @@
-use crate::{error::InstrumentError, instruction, pipe, proc, ptrace};
+use crate::{error::InstrumentError, instruction, proc, ptrace};
 use std::ffi::CString;
 
 const TRAMPOLINE_SIZE: u64 = 1024;
 const SYSCALL_MMAP: u64 = 222;
 const SYSCALL_MPROTECT: u64 = 226;
+const SYSCALL_OPEN: u64 = 56;
+
+pub struct InstrumentTarget {
+    pub addr: u64,
+    pub builder: Box<dyn instruction::TrampolineBuilder>,
+    pub pipe_path: String,
+}
 
 pub struct NotInstrumented {
     tracee: ptrace::Attached,
-    target_addr: u64,
-    pipe_path: String,
+    targets: Vec<InstrumentTarget>,
+}
+
+struct AllocatedTarget {
+    addr: u64,
+    trampoline_addr: u64,
+    pipe_fd: u32,
+    builder: Box<dyn instruction::TrampolineBuilder>,
 }
 
 struct TrampolineAllocating {
     tracee: ptrace::Stopped,
-    target_addr: u64,
-    pipe_path: String,
+    targets: Vec<InstrumentTarget>,
 }
 
 struct TrampolineAllocated {
     tracee: ptrace::Attached,
-    target_addr: u64,
-    trampoline_exec_addr: u64,
-    pipe_fd: u32,
+    targets: Vec<AllocatedTarget>,
 }
 
 struct TrampolineWriting {
     tracee: ptrace::Stopped,
-    target_addr: u64,
-    trampoline_addr: u64,
+    targets: Vec<AllocatedTarget>,
 }
 
 struct TrampolineWrote {
     tracee: ptrace::Attached,
-    target_addr: u64,
-    trampoline_addr: u64,
+    targets: Vec<AllocatedTarget>,
 }
 
 struct TrampolinePermissionChanging {
     tracee: ptrace::Stopped,
-    target_addr: u64,
-    trampoline_addr: u64,
+    targets: Vec<AllocatedTarget>,
 }
 
 struct TrampolinePermissionChanged {
     tracee: ptrace::Attached,
-    target_addr: u64,
-    trampoline_addr: u64,
+    targets: Vec<AllocatedTarget>,
 }
 
 pub fn new(
     value: proc::Proc,
-    target_addr: u64,
-    pipe: &pipe::Pipe,
+    targets: Vec<InstrumentTarget>,
 ) -> Result<NotInstrumented, InstrumentError> {
     let tracee = ptrace::Attached::try_from(value)?;
-    Ok(NotInstrumented {
-        tracee,
-        target_addr,
-        pipe_path: pipe.path().to_string(),
-    })
+    Ok(NotInstrumented { tracee, targets })
 }
 
 impl NotInstrumented {
@@ -81,8 +82,7 @@ impl TryFrom<NotInstrumented> for TrampolineAllocating {
     fn try_from(value: NotInstrumented) -> Result<Self, Self::Error> {
         Ok(Self {
             tracee: ptrace::Stopped::try_from(value.tracee)?,
-            target_addr: value.target_addr,
-            pipe_path: value.pipe_path,
+            targets: value.targets,
         })
     }
 }
@@ -90,8 +90,6 @@ impl TryFrom<NotInstrumented> for TrampolineAllocating {
 // システムコールをptraceで呼ぶ
 fn call_svc(
     tracee: ptrace::Stopped,
-    // size: u64,
-    // prot: u64,
     syscall_number: u64,
     params: &[u64],
 ) -> Result<(ptrace::Attached, u64), InstrumentError> {
@@ -135,23 +133,10 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
     type Error = InstrumentError;
 
     fn try_from(value: TrampolineAllocating) -> Result<Self, Self::Error> {
-        let tracee = value.tracee;
-
-        let (tracee, trampoline_exec_addr) = call_svc(
-            tracee,
-            SYSCALL_MMAP,
-            &[
-                0,               // addr hint
-                TRAMPOLINE_SIZE, // Size
-                3,               // PROT_*
-                0x22,            // MAP_PRIVATE | MAP_ANONYMOUS
-                u64::MAX,        // fd = -1
-            ],
-        )?;
-        let tracee = ptrace::Stopped::try_from(tracee)?;
+        let mut tracee = value.tracee;
 
         // 適当なデータを置くための領域（ヒープ的な）
-        let (tracee, trampoline_stack_addr) = call_svc(
+        let (attached, trampoline_stack_addr) = call_svc(
             tracee,
             SYSCALL_MMAP,
             &[
@@ -162,34 +147,56 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
                 u64::MAX,        // fd = -1
             ],
         )?;
-        let tracee = ptrace::Stopped::try_from(tracee)?;
+        tracee = ptrace::Stopped::try_from(attached)?;
 
-        let binding = CString::new(value.pipe_path.as_str())?;
-        let pipe_path = binding.as_bytes_with_nul();
-        println!(
-            "Writing pipe path to 0x{:x}: {:?}",
-            trampoline_stack_addr, value.pipe_path
-        );
-        tracee.write_bytes(trampoline_stack_addr, pipe_path)?;
-        println!(
-            "Wrote {} bytes to 0x{:x}-0x{:x}",
-            pipe_path.len(),
-            trampoline_stack_addr,
-            trampoline_stack_addr + pipe_path.len() as u64
-        );
+        let mut allocated_targets = Vec::new();
 
-        let (tracee, pipe_fd) = call_svc(
-            tracee,
-            56,
-            &[0xFFFFFFFFFFFFFF9C, trampoline_stack_addr, 0x801],
-        )?;
-        let tracee = ptrace::Stopped::try_from(tracee)?;
+        for target in value.targets {
+            let (attached, trampoline_addr) = call_svc(
+                tracee,
+                SYSCALL_MMAP,
+                &[
+                    0,               // addr hint
+                    TRAMPOLINE_SIZE, // Size
+                    3,               // PROT_*
+                    0x22,            // MAP_PRIVATE | MAP_ANONYMOUS
+                    u64::MAX,        // fd = -1
+                ],
+            )?;
+            tracee = ptrace::Stopped::try_from(attached)?;
+
+            let binding = CString::new(target.pipe_path.as_str())?;
+            let pipe_path = binding.as_bytes_with_nul();
+            println!(
+                "Writing pipe path to 0x{:x}: {:?}",
+                trampoline_stack_addr, target.pipe_path
+            );
+            tracee.write_bytes(trampoline_stack_addr, pipe_path)?;
+            println!(
+                "Wrote {} bytes to 0x{:x}-0x{:x}",
+                pipe_path.len(),
+                trampoline_stack_addr,
+                trampoline_stack_addr + pipe_path.len() as u64
+            );
+
+            let (attached, pipe_fd) = call_svc(
+                tracee,
+                SYSCALL_OPEN,
+                &[0xFFFFFFFFFFFFFF9C, trampoline_stack_addr, 0x801],
+            )?;
+            tracee = ptrace::Stopped::try_from(attached)?;
+
+            allocated_targets.push(AllocatedTarget {
+                addr: target.addr,
+                trampoline_addr,
+                pipe_fd: pipe_fd.try_into()?,
+                builder: target.builder,
+            });
+        }
 
         Ok(TrampolineAllocated {
             tracee: tracee.try_into()?,
-            target_addr: value.target_addr,
-            trampoline_exec_addr,
-            pipe_fd: pipe_fd.try_into()?,
+            targets: allocated_targets,
         })
     }
 }
@@ -199,26 +206,27 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
 
     fn try_from(value: TrampolineAllocated) -> Result<Self, Self::Error> {
         let tracee = ptrace::Stopped::try_from(value.tracee)?;
-        let trampoline_exe_addr = value.trampoline_exec_addr;
-        let target_addr = value.target_addr;
 
-        // 4バイト分ずらすので注意！
-        let target_bin1 = instruction::Instructions::from(tracee.read(target_addr)?);
-        let target_bin2 = instruction::Instructions::from(tracee.read(target_addr + 8)?);
-        let inst1 = target_bin1.get(0).unwrap();
-        let inst2 = target_bin1.get(1).unwrap();
-        let inst3 = target_bin2.get(0).unwrap();
-        let inst4 = target_bin2.get(1).unwrap();
+        for target in &value.targets {
+            // 4バイト分ずらすので注意！
+            let target_bin1 = instruction::Instructions::from(tracee.read(target.addr)?);
+            let target_bin2 = instruction::Instructions::from(tracee.read(target.addr + 8)?);
+            let inst1 = target_bin1.get(0).unwrap();
+            let inst2 = target_bin1.get(1).unwrap();
+            let inst3 = target_bin2.get(0).unwrap();
+            let inst4 = target_bin2.get(1).unwrap();
 
-        // トランポリンコードを構築して書き込み
-        let trampoline =
-            instruction::build_trampoline(value.pipe_fd, target_addr, inst1, inst2, inst3, inst4);
-        tracee.write_instructions(trampoline_exe_addr, trampoline)?;
+            // トランポリンコードを構築して書き込み
+            let trampoline =
+                target
+                    .builder
+                    .build(target.pipe_fd, target.addr, inst1, inst2, inst3, inst4);
+            tracee.write_instructions(target.trampoline_addr, trampoline)?;
+        }
 
         Ok(TrampolineWriting {
             tracee,
-            target_addr,
-            trampoline_addr: trampoline_exe_addr,
+            targets: value.targets,
         })
     }
 }
@@ -229,8 +237,7 @@ impl TryFrom<TrampolineWriting> for TrampolineWrote {
     fn try_from(value: TrampolineWriting) -> Result<Self, Self::Error> {
         Ok(TrampolineWrote {
             tracee: ptrace::Attached::try_from(value.tracee)?,
-            target_addr: value.target_addr,
-            trampoline_addr: value.trampoline_addr,
+            targets: value.targets,
         })
     }
 }
@@ -241,8 +248,7 @@ impl TryFrom<TrampolineWrote> for TrampolinePermissionChanging {
     fn try_from(value: TrampolineWrote) -> Result<Self, Self::Error> {
         Ok(TrampolinePermissionChanging {
             tracee: ptrace::Stopped::try_from(value.tracee)?,
-            target_addr: value.target_addr,
-            trampoline_addr: value.trampoline_addr,
+            targets: value.targets,
         })
     }
 }
@@ -251,29 +257,30 @@ impl TryFrom<TrampolinePermissionChanging> for TrampolinePermissionChanged {
     type Error = InstrumentError;
 
     fn try_from(value: TrampolinePermissionChanging) -> Result<Self, Self::Error> {
-        let tracee = value.tracee;
-        let trampoline_addr = value.trampoline_addr;
-        let target_addr = value.target_addr;
+        let mut tracee = value.tracee;
 
-        // mprotectシステムコールでトランポリンを実行可能にする
-        let (tracee, result) = call_svc(
-            tracee,
-            SYSCALL_MPROTECT, // mprotect syscall number
-            &[
-                trampoline_addr,
-                TRAMPOLINE_SIZE,
-                5, // PROT_READ | PROT_EXEC
-            ],
-        )?;
+        for target in &value.targets {
+            // mprotectシステムコールでトランポリンを実行可能にする
+            let (attached, result) = call_svc(
+                tracee,
+                SYSCALL_MPROTECT, // mprotect syscall number
+                &[
+                    target.trampoline_addr,
+                    TRAMPOLINE_SIZE,
+                    5, // PROT_READ | PROT_EXEC
+                ],
+            )?;
 
-        if result != 0 {
-            return Err(InstrumentError::MprotectFailed(result));
+            if result != 0 {
+                return Err(InstrumentError::MprotectFailed(result));
+            }
+
+            tracee = ptrace::Stopped::try_from(attached)?;
         }
 
         Ok(TrampolinePermissionChanged {
-            tracee,
-            target_addr,
-            trampoline_addr,
+            tracee: ptrace::Attached::try_from(tracee)?,
+            targets: value.targets,
         })
     }
 }
@@ -283,12 +290,12 @@ impl TryFrom<TrampolinePermissionChanged> for proc::Proc {
 
     fn try_from(value: TrampolinePermissionChanged) -> Result<Self, Self::Error> {
         let tracee = ptrace::Stopped::try_from(value.tracee)?;
-        let trampoline_addr = value.trampoline_addr;
-        let target_addr = value.target_addr;
 
-        // ターゲットアドレスに絶対ジャンプを書き込み
-        let patch = instruction::jump_to_abs(trampoline_addr);
-        tracee.write_instructions(target_addr, patch)?;
+        for target in &value.targets {
+            // ターゲットアドレスに絶対ジャンプを書き込み
+            let patch = instruction::jump_to_abs(target.trampoline_addr);
+            tracee.write_instructions(target.addr, patch)?;
+        }
 
         // デタッチして元のProcに戻す
         Ok(tracee.try_into()?)

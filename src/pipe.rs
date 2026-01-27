@@ -11,13 +11,15 @@ pub struct Pipe {
 }
 
 impl Pipe {
-    pub fn new(target_symbol: &str, pid: Pid) -> Result<Self, PipeError> {
+    pub fn new(target_symbol: &str, pid: Pid, suffix: Option<&str>) -> Result<Self, PipeError> {
         let tmpdir = temp_dir();
         // シンボル名のスラッシュをアンダースコアに置換してファイル名として安全にする
-        let safe_symbol = target_symbol.replace('/', "_");
+        // これをしないとディレクトリを事前に作る必要ができて面倒
+        let target_symbol = target_symbol.replace('/', "_");
+        let suffix = suffix.unwrap_or("").replace("/", "_");
         let pipe_dir = tmpdir.join("tracer");
         std::fs::create_dir_all(&pipe_dir).map_err(PipeError::FailedToCreateDirectory)?;
-        let path = pipe_dir.join(format!("{}_{}.pipe", safe_symbol, pid));
+        let path = pipe_dir.join(format!("{}_{}_{}.pipe", pid, target_symbol, suffix));
 
         // 既存のパイプファイルが存在する場合は削除
         if path.exists() {
