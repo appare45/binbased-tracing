@@ -61,12 +61,7 @@ impl From<i64> for Instructions {
 fn push_registers_to_stack() -> Instructions {
     let mut instructions = Instructions::new();
 
-    // Save frame pointer and link register
-    instructions.push(build_stp(29, 30, 31, -32)); // stp x29, x30, [sp, #-32]!
-    // Save x18, x19 for alignment
-    instructions.push(build_stp(18, 19, 31, -16)); // stp x18, x19, [sp, #-16]!
-
-    for i in 0..9 {
+    for i in 0..15 {
         instructions.push(build_stp(i * 2, i * 2 + 1, 31, -16));
     }
     instructions
@@ -99,15 +94,9 @@ pub fn jump_to_abs(target_addr: u64) -> Instructions {
 
 fn pop_registers_from_stack() -> Instructions {
     let mut instructions = Instructions::new();
-    for i in (0..9).rev() {
+    for i in (0..15).rev() {
         instructions.push(build_ldp(2 * i, 2 * i + 1, 31, 16));
     }
-
-    // Restore x18, x19
-    instructions.push(build_ldp(18, 19, 31, 16)); // ldp x18, x19, [sp], #16
-    // Restore frame pointer and link register
-    // TODO: 32 to 16
-    instructions.push(build_ldp(29, 30, 31, 32)); // ldp x29, x30, [sp], #32
 
     instructions
 }
