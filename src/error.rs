@@ -80,7 +80,7 @@ pub enum InstrumentError {
     MprotectFailed(u64),
 
     #[error("Failed to mmap")]
-    MmapFailed,
+    SyscallFailed(u64),
 
     #[error("String is not available")]
     StringIsNotAvailable(#[from] std::ffi::NulError),

@@ -26,8 +26,6 @@ impl Into<Vec<i64>> for Instructions {
             .map(|chunk| {
                 let low = chunk[0] as i64;
                 let high = chunk[1] as i64;
-
-                // Combine in little-endian order: low 32 bits first, then high 32 bits
                 (high << 32) | (low & 0xFFFFFFFF)
             })
             .collect()
