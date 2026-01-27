@@ -175,31 +175,35 @@ pub fn build_trampoline(
     let mut instructions = Instructions::new();
     instructions.join(push_registers_to_stack());
 
-    // openat(-100, stack_addr, O_WRONLY)
-    // x0: dirfd = AT_FDCWD = -100 (0xFFFFFFFFFFFFFF9C)
-    instructions.join(build_large_mov(0, 0xFFFFFFFFFFFFFF9C));
-    // x1: pathname (FIFOパス)
-    instructions.join(build_large_mov(1, fifo_path_addr));
-    // x2: flags = O_WRONLY = 1
-    instructions.push(build_movz(2, 1, 0));
-    // x8: syscall number = openat = 56
-    instructions.push(build_movz(8, 56, 0));
-    instructions.push(0xd4000001); // svc #0          (make syscall)
-    instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!        スタックにx0を保存
+    // openat(-100, fifo_path_addr, O_WRONLY | O_NONBLOCK)
+    instructions.join(build_large_mov(0, 0xFFFFFFFFFFFFFF9C)); // x0 = AT_FDCWD
+    instructions.join(build_large_mov(1, fifo_path_addr)); // x1 = pathname
+    instructions.push(build_movz(2, 0x801, 0)); // x2 = O_WRONLY | O_NONBLOCK (1 | 0x800)
+    instructions.push(build_movz(8, 56, 0)); // x8 = openat
+    instructions.push(0xd4000001); // svc #0
 
-    // x0に現在の時刻を保存
-    instructions.push(0xd53be040); // mrs     x0, cntvct_el0
-    instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!        スタックにx0を保存
+    // fdをスタックに保存
+    instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!
 
-    // Setup write(1, sp, 1) syscall
-    instructions.push(build_movz(1, 31, 0)); // mov x1, sp      
-    instructions.push(build_movz(0, 31, 0)); // mov x0, sp      
-    instructions.push(0xd2800022); // mov x2, #8      (count = 8)
-    instructions.push(0xd2800808); // mov x8, #64     (syscall number for write)
-    instructions.push(0xd4000001); // svc #0          (make syscall)
+    // タイムスタンプを取得してスタックに保存
+    instructions.push(0xd53be040); // mrs x0, cntvct_el0
+    instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!
 
-    // Clean up the buffer from stack
-    instructions.push(0x910083ff); // add sp, sp, #32(pop the buffer)
+    // write(fd, sp, 8) - タイムスタンプをパイプに書き込む
+    // スタック配置: sp+0=timestamp, sp+16=fd (各strが16バイトプリデクリメント)
+    instructions.push(0xf9400be0); // ldr x0, [sp, #16] (fd)
+    instructions.push(0x910003e1); // mov x1, sp (タイムスタンプのアドレス)
+    instructions.push(build_movz(2, 8, 0)); // x2 = 8
+    instructions.push(build_movz(8, 64, 0)); // x8 = write
+    instructions.push(0xd4000001); // svc #0
+
+    // close(fd) - パイプを閉じる
+    instructions.push(0xf9400be0); // ldr x0, [sp, #16] (fd)
+    instructions.push(build_movz(8, 57, 0)); // x8 = close
+    instructions.push(0xd4000001); // svc #0
+
+    // スタックをクリーンアップ (timestamp + fd = 32バイト)
+    instructions.push(0x910083ff); // add sp, sp, #32
 
     instructions.join(pop_registers_from_stack());
 

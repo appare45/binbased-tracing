@@ -13,10 +13,18 @@ pub struct Pipe {
 impl Pipe {
     pub fn new(target_symbol: &str, pid: Pid) -> Result<Self, PipeError> {
         let tmpdir = temp_dir();
-        let pipe_dir = tmpdir.join(format!("tracer/{target_symbol}"));
+        // シンボル名のスラッシュをアンダースコアに置換してファイル名として安全にする
+        let safe_symbol = target_symbol.replace('/', "_");
+        let pipe_dir = tmpdir.join("tracer");
         std::fs::create_dir_all(&pipe_dir).map_err(PipeError::FailedToCreateDirectory)?;
-        let path = pipe_dir.join(format!("{}.pipe", pid));
-        unistd::mkfifo(&path, sys::stat::Mode::S_IRWXG).map_err(PipeError::FailedToMkfifo)?;
+        let path = pipe_dir.join(format!("{}_{}.pipe", safe_symbol, pid));
+
+        // 既存のパイプファイルが存在する場合は削除
+        if path.exists() {
+            let _ = fs::remove_file(&path);
+        }
+
+        unistd::mkfifo(&path, sys::stat::Mode::S_IRWXU).map_err(PipeError::FailedToMkfifo)?;
         println!("Created pipe on {path:?}");
         Ok(Self { path })
     }

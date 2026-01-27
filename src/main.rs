@@ -1,9 +1,15 @@
 use clap::Parser;
 use clap::Subcommand;
+use nix::fcntl::{OFlag, open};
+use nix::sys::stat::Mode;
 use nix::sys::wait;
+use std::fs::File;
+use std::io::Read;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::process::Command;
-
 use std::process::Stdio;
+use std::thread;
+use std::time::Duration;
 
 mod conf;
 mod elf;
@@ -70,13 +76,70 @@ fn main() {
 
     let pipe = pipe::Pipe::new(TARGET_SYMBOL, proc.pid).expect("Failed to create pipe");
 
+    let pipe_path = pipe.path().to_string();
+    let reader_thread = thread::spawn(move || {
+        println!(
+            "Pipe reader thread started, waiting for data from: {}",
+            pipe_path
+        );
+        let fd = loop {
+            match open(pipe_path.as_str(), OFlag::O_RDONLY, Mode::empty()) {
+                Ok(fd) => break fd,
+                Err(e) => {
+                    eprintln!("Failed to open pipe (retrying): {:?}", e);
+                    thread::sleep(Duration::from_millis(100));
+                }
+            }
+        };
+
+        println!("Pipe opened successfully in non-blocking mode");
+        let mut file = unsafe { File::from_raw_fd(fd.as_raw_fd()) };
+        let mut counter = 0u64;
+        let mut buffer = vec![0u8; 0];
+        let mut temp_buf = [0u8; 8];
+
+        loop {
+            match file.read(&mut temp_buf) {
+                Ok(n) if n > 0 => {
+                    println!("Read {} bytes from pipe", n);
+                    buffer.extend_from_slice(&temp_buf[..n]);
+                    while buffer.len() >= 8 {
+                        let timestamp_bytes: [u8; 8] =
+                            buffer.drain(..8).collect::<Vec<u8>>().try_into().unwrap();
+                        let timestamp = u64::from_le_bytes(timestamp_bytes);
+                        counter += 1;
+                        println!(
+                            "[TRACE #{}] Timestamp: 0x{:016x} ({})",
+                            counter, timestamp, timestamp
+                        );
+                    }
+                }
+                Ok(_) => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => {
+                    println!("Pipe read error: {:?}", e);
+                    break;
+                }
+            }
+        }
+        println!("Pipe reader thread exiting after {} entries", counter);
+    });
+
     let instrument = instrument::new(proc, target_addr, &pipe).expect("Failed to start instrument");
     let proc = instrument.instrument().expect("Failed to instrument");
+
+    println!("Instrumentation complete. Waiting for program events...");
+
     loop {
         match proc.wait_for_status() {
             Ok(status) => match status {
                 wait::WaitStatus::Exited(_, code) => {
                     println!("Program exited with {code}");
+                    break;
                 }
                 status => println!("{status:?}"),
             },
@@ -86,4 +149,7 @@ fn main() {
             }
         };
     }
+    println!("Waiting for pipe reader thread to finish...");
+    drop(pipe); // パイプをクローズしてリーダーを終了させる
+    let _ = reader_thread.join();
 }
