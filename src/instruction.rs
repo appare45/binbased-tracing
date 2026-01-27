@@ -152,7 +152,7 @@ fn build_movk_test() {
 }
 
 pub fn build_trampoline(
-    fifo_path_addr: u64,
+    pipe_fd: u32,
     replaced_addr: u64,
     inst1: u32,
     inst2: u32,
@@ -162,36 +162,19 @@ pub fn build_trampoline(
     let mut instructions = Instructions::new();
     instructions.join(push_registers_to_stack());
 
-    // openat(-100, fifo_path_addr, O_WRONLY | O_NONBLOCK)
-    instructions.join(build_large_mov(0, 0xFFFFFFFFFFFFFF9C)); // x0 = AT_FDCWD
-    instructions.join(build_large_mov(1, fifo_path_addr)); // x1 = pathname
-    instructions.push(build_movz(2, 0x801, 0)); // x2 = O_WRONLY | O_NONBLOCK (1 | 0x800)
-    instructions.push(build_movz(8, 56, 0)); // x8 = openat
-    instructions.push(0xd4000001); // svc #0
-
-    // fdをスタックに保存
-    instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!
-
     // タイムスタンプを取得してスタックに保存
     instructions.push(0xd53be040); // mrs x0, cntvct_el0
     instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!
 
     // write(fd, sp, 8) - タイムスタンプをパイプに書き込む
-    // スタック配置: sp+0=timestamp, sp+16=fd (各strが16バイトプリデクリメント)
-    instructions.push(0xf9400be0); // ldr x0, [sp, #16] (fd)
+    instructions.push(build_movz(0, pipe_fd, 0));
     instructions.push(0x910003e1); // mov x1, sp (タイムスタンプのアドレス)
     instructions.push(build_movz(2, 8, 0)); // x2 = 8
     instructions.push(build_movz(8, 64, 0)); // x8 = write
     instructions.push(0xd4000001); // svc #0
 
-    // close(fd) - パイプを閉じる
-    instructions.push(0xf9400be0); // ldr x0, [sp, #16] (fd)
-    instructions.push(build_movz(8, 57, 0)); // x8 = close
-    instructions.push(0xd4000001); // svc #0
-
-    // スタックをクリーンアップ (timestamp + fd = 32バイト)
-    instructions.push(0x910083ff); // add sp, sp, #32
-
+    // スタックをクリーンアップ (timestamp = 16バイト)
+    instructions.push(0x910043ff); // add sp, sp, #16
     instructions.join(pop_registers_from_stack());
 
     // Execute all 4 instructions that were overwritten by jump_to_abs (16 bytes total)

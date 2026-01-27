@@ -84,6 +84,9 @@ pub enum InstrumentError {
 
     #[error("String is not available")]
     StringIsNotAvailable(#[from] std::ffi::NulError),
+
+    #[error("Failed to convert u64 into u32")]
+    Overflow(#[from] std::num::TryFromIntError),
 }
 
 #[derive(Error, Debug)]

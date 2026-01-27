@@ -21,7 +21,7 @@ struct TrampolineAllocated {
     tracee: ptrace::Attached,
     target_addr: u64,
     trampoline_exec_addr: u64,
-    trampoline_stack_addr: u64,
+    pipe_fd: u32,
 }
 
 struct TrampolineWriting {
@@ -178,11 +178,18 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
             trampoline_stack_addr + pipe_path.len() as u64
         );
 
+        let (tracee, pipe_fd) = call_svc(
+            tracee,
+            56,
+            &[0xFFFFFFFFFFFFFF9C, trampoline_stack_addr, 0x801],
+        )?;
+        let tracee = ptrace::Stopped::try_from(tracee)?;
+
         Ok(TrampolineAllocated {
             tracee: tracee.try_into()?,
             target_addr: value.target_addr,
             trampoline_exec_addr,
-            trampoline_stack_addr,
+            pipe_fd: pipe_fd.try_into()?,
         })
     }
 }
@@ -192,7 +199,6 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
 
     fn try_from(value: TrampolineAllocated) -> Result<Self, Self::Error> {
         let tracee = ptrace::Stopped::try_from(value.tracee)?;
-        let trampoline_stack_addr = value.trampoline_stack_addr;
         let trampoline_exe_addr = value.trampoline_exec_addr;
         let target_addr = value.target_addr;
 
@@ -205,14 +211,8 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
         let inst4 = target_bin2.get(1).unwrap();
 
         // トランポリンコードを構築して書き込み
-        let trampoline = instruction::build_trampoline(
-            trampoline_stack_addr,
-            target_addr,
-            inst1,
-            inst2,
-            inst3,
-            inst4,
-        );
+        let trampoline =
+            instruction::build_trampoline(value.pipe_fd, target_addr, inst1, inst2, inst3, inst4);
         tracee.write_instructions(trampoline_exe_addr, trampoline)?;
 
         Ok(TrampolineWriting {
