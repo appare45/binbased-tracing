@@ -9,15 +9,18 @@ pub enum ProcError {
 
     #[error("Failed to waitpid")]
     FailedToWaitPid(#[source] nix::errno::Errno),
+
+    #[error("IO error")]
+    IoError(#[from] std::io::Error),
+
+    #[error("Elf Error")]
+    ElfError(#[from] ElfError),
 }
 
 #[derive(Error, Debug)]
 pub enum ElfError {
     #[error("Not an Elf file")]
     NotAnElfFile,
-
-    #[error("IO error")]
-    IoError(#[from] std::io::Error),
 
     #[error("Not found")]
     NotFound,

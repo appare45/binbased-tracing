@@ -5,11 +5,7 @@ use std::{
 
 use nix::{sys::wait, unistd};
 
-use crate::{
-    elf,
-    error::{ElfError, ProcError},
-    maps,
-};
+use crate::{elf, error::ProcError, maps};
 
 /**
  * 実行中のトレース対象プログラムを保持する
@@ -24,15 +20,17 @@ pub fn new(pid: unistd::Pid) -> Result<Proc, ProcError> {
     return Ok(Proc { pid });
 }
 impl Proc {
-    pub fn get_bin(&self) -> Result<elf::ELF, crate::error::ElfError> {
-        let mut buf = Vec::new();
-        File::open(format!("/proc/{}/exe", self.pid))
-            .map_err(ElfError::IoError)?
-            .read_to_end(&mut buf)?;
-        elf::new(&buf)
+    pub fn get_exe(&self) -> Result<File, ProcError> {
+        Ok(File::open(format!("/proc/{}/exe", self.pid))?)
     }
 
-    fn get_maps(&self) -> Result<impl Iterator<Item = maps::MemMap>, ElfError> {
+    pub fn get_bin(&self) -> Result<elf::ELF, ProcError> {
+        let mut buf = Vec::new();
+        self.get_exe()?.read_to_end(&mut buf)?;
+        Ok(elf::new(&buf)?)
+    }
+
+    fn get_maps(&self) -> Result<impl Iterator<Item = maps::MemMap>, ProcError> {
         let file = File::open(format!("/proc/{}/maps", self.pid))?;
         Ok(maps::parse_maps(BufReader::new(file)))
     }
