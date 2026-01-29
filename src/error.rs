@@ -109,3 +109,12 @@ pub enum EventError {
     #[error("Invalid event type: {0}")]
     InvalidEventType(u8),
 }
+
+#[derive(Error, Debug)]
+pub enum MonitorError {
+    #[error("Process error")]
+    ProcError(#[from] ProcError),
+
+    #[error("Failed to join collector thread")]
+    CollectorThreadJoinFailed,
+}

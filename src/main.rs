@@ -15,6 +15,7 @@ mod pipe;
 mod proc;
 mod ptrace;
 mod symbol_analyzer;
+mod trace_collector;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -36,16 +37,22 @@ compile_error!("This crate only supports aarch64 architecture");
 
 #[cfg(target_arch = "aarch64")]
 fn main() {
+    use std::sync::mpsc::channel;
+
     let (c, proc, is_child) = setup_process().expect("Failed to setup process");
     let analysis =
         symbol_analyzer::analyze_function(&proc, TARGET_SYMBOL).expect("Failed to analyze symbol");
-    let plan = instrument::plan_instrumentation(&proc, &analysis, TARGET_SYMBOL)
+
+    // Create channel for trace events
+    let (event_tx, event_rx) = channel();
+
+    let plan = instrument::plan_instrumentation(&proc, &analysis, TARGET_SYMBOL, event_tx)
         .expect("Failed to plan instrumentation");
 
     let inst = instrument::new(proc, plan.targets).expect("Failed to create instrument");
     let proc = inst.instrument().expect("Failed to instrument");
 
-    monitor::monitor_process(&proc, is_child, plan.pipes, plan.readers)
+    monitor::monitor_process(&proc, is_child, plan.pipes, plan.readers, event_rx)
         .expect("Failed to monitor process");
 
     // これをするとdropするタイミングをコンパイルするときにここまで生きていることを知れる

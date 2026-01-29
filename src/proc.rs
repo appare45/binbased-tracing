@@ -10,7 +10,7 @@ use crate::{elf, error::ProcError, maps};
 /**
  * 実行中のトレース対象プログラムを保持する
  */
-
+#[derive(Clone, Copy)]
 pub struct Proc {
     pub pid: unistd::Pid,
 }

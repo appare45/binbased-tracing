@@ -5,13 +5,13 @@ use nix::{sys, unistd};
 use std::env::temp_dir;
 use std::fs::{self, File};
 use std::io::Read as _;
-use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crate::error::PipeError;
 use crate::event::TraceEvent;
+use std::sync::mpsc::Sender;
 
 pub struct Pipe {
     path: PathBuf,
@@ -42,7 +42,7 @@ impl Pipe {
         self.path.to_str().unwrap_or("")
     }
 
-    pub fn start_reader(&self) -> JoinHandle<u64> {
+    pub fn start_reader(&self, tx: Sender<TraceEvent>) -> JoinHandle<u64> {
         let pipe_path = self.path().to_string();
 
         thread::spawn(move || {
@@ -62,17 +62,22 @@ impl Pipe {
                 }
             };
 
-            println!("Pipe opened successfully in non-blocking mode");
+            println!("Pipe opened successfully for {}", pipe_path);
 
-            let mut file = unsafe { File::from_raw_fd(fd.as_raw_fd()) };
+            let mut file = File::from(fd);
             let mut counter = 0u64;
             let mut buffer = vec![0u8; 0];
             let mut temp_buf = [0u8; 24];
 
             loop {
                 match file.read(&mut temp_buf) {
-                    Ok(n) if n > 0 => {
-                        println!("Read {} bytes from pipe", n);
+                    Ok(0) => {
+                        // EOF: 書き込み側が全てcloseされた
+                        println!("Pipe closed (EOF), stopping reader for {}", pipe_path);
+                        break;
+                    }
+                    Ok(n) => {
+                        // n > 0: データを受信
                         buffer.extend_from_slice(&temp_buf[..n]);
                         while buffer.len() >= 24 {
                             let event_bytes: [u8; 24] =
@@ -81,13 +86,13 @@ impl Pipe {
                             match TraceEvent::from_bytes(&event_bytes) {
                                 Ok(event) => {
                                     counter += 1;
-                                    // Copy fields to locals to avoid unaligned references
-                                    let x28 = event.x28_value;
-                                    let ts = event.timestamp;
-                                    println!(
-                                        "[TRACE #{}] {:?} - x28: 0x{:016x}, Timestamp: 0x{:016x} ({})",
-                                        counter, event.event_type, x28, ts, ts
-                                    );
+                                    if tx.send(event).is_err() {
+                                        println!(
+                                            "Receiver dropped, stopping reader for {}",
+                                            pipe_path
+                                        );
+                                        return counter;
+                                    }
                                 }
                                 Err(e) => {
                                     eprintln!("Failed to parse trace event: {:?}", e);
@@ -95,19 +100,21 @@ impl Pipe {
                             }
                         }
                     }
-                    Ok(_) => {
-                        thread::sleep(Duration::from_millis(10));
-                    }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(10));
                     }
                     Err(e) => {
-                        println!("Pipe read error: {:?}", e);
+                        println!("Pipe read error for {}: {:?}", pipe_path, e);
                         break;
                     }
                 }
             }
-            println!("Pipe reader thread exiting after {} entries", counter);
+            println!(
+                "Pipe reader thread exiting after {} entries from {}",
+                counter, pipe_path
+            );
+
+            drop(tx); // Explicitly drop sender
             counter
         })
     }
@@ -115,7 +122,11 @@ impl Pipe {
 
 impl Drop for Pipe {
     fn drop(&mut self) {
-        println!("Pipe is dropped!");
-        fs::remove_file(&self.path).expect("Failed to delete pipe");
+        println!("Pipe is dropped! Removing: {:?}", self.path);
+        if let Err(e) = fs::remove_file(&self.path) {
+            eprintln!("Warning: Failed to delete pipe {:?}: {}", self.path, e);
+        } else {
+            println!("Successfully removed pipe: {:?}", self.path);
+        }
     }
 }

@@ -1,5 +1,8 @@
-use crate::{error::InstrumentError, instruction, pipe, proc, ptrace, symbol_analyzer};
+use crate::{
+    error::InstrumentError, event::TraceEvent, instruction, pipe, proc, ptrace, symbol_analyzer,
+};
 use std::ffi::CString;
+use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 
 const TRAMPOLINE_SIZE: u64 = 1024;
@@ -24,12 +27,13 @@ pub fn plan_instrumentation(
     proc: &proc::Proc,
     analysis: &symbol_analyzer::FunctionAnalysis,
     symbol_name: &str,
+    event_tx: Sender<TraceEvent>,
 ) -> Result<InstrumentationPlan, InstrumentError> {
     let pipe_entry = pipe::Pipe::new(symbol_name, proc.pid, Some("entry"))?;
-    let reader_entry = pipe_entry.start_reader();
+    let reader_entry = pipe_entry.start_reader(event_tx.clone());
 
     let pipe_end = pipe::Pipe::new(symbol_name, proc.pid, Some("end"))?;
-    let reader_end = pipe_end.start_reader();
+    let reader_end = pipe_end.start_reader(event_tx);
 
     let mut targets = vec![InstrumentTarget {
         addr: analysis.entry_addr,
