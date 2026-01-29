@@ -6,6 +6,7 @@ use std::process::Stdio;
 mod conf;
 mod elf;
 mod error;
+mod event;
 mod instruction;
 mod instrument;
 mod maps;

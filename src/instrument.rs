@@ -11,6 +11,7 @@ pub struct InstrumentTarget {
     pub addr: u64,
     pub builder: Box<dyn instruction::TrampolineBuilder>,
     pub pipe_path: String,
+    pub event_type: u8,
 }
 
 pub struct InstrumentationPlan {
@@ -34,6 +35,7 @@ pub fn plan_instrumentation(
         addr: analysis.entry_addr,
         builder: Box::new(instruction::EntryTrampolineBuilder()),
         pipe_path: pipe_entry.path().to_string(),
+        event_type: 0, // Entry
     }];
 
     for ret_addr in &analysis.ret_addrs {
@@ -41,6 +43,7 @@ pub fn plan_instrumentation(
             addr: *ret_addr,
             builder: Box::new(instruction::EntryTrampolineBuilder()),
             pipe_path: pipe_end.path().to_string(),
+            event_type: 1, // Return
         });
     }
 
@@ -61,6 +64,7 @@ struct AllocatedTarget {
     trampoline_addr: u64,
     pipe_fd: u32,
     builder: Box<dyn instruction::TrampolineBuilder>,
+    event_type: u8,
 }
 
 struct TrampolineAllocating {
@@ -230,6 +234,7 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
                 trampoline_addr,
                 pipe_fd: pipe_fd.try_into()?,
                 builder: target.builder,
+                event_type: target.event_type,
             });
         }
 
@@ -256,10 +261,15 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
             let inst4 = target_bin2.get(1).unwrap();
 
             // トランポリンコードを構築して書き込み
-            let trampoline =
-                target
-                    .builder
-                    .build(target.pipe_fd, target.addr, inst1, inst2, inst3, inst4);
+            let trampoline = target.builder.build(
+                target.pipe_fd,
+                target.addr,
+                inst1,
+                inst2,
+                inst3,
+                inst4,
+                target.event_type,
+            );
             tracee.write_instructions(target.trampoline_addr, trampoline)?;
         }
 

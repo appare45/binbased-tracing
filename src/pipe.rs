@@ -11,6 +11,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crate::error::PipeError;
+use crate::event::TraceEvent;
 
 pub struct Pipe {
     path: PathBuf,
@@ -66,22 +67,32 @@ impl Pipe {
             let mut file = unsafe { File::from_raw_fd(fd.as_raw_fd()) };
             let mut counter = 0u64;
             let mut buffer = vec![0u8; 0];
-            let mut temp_buf = [0u8; 8];
+            let mut temp_buf = [0u8; 24];
 
             loop {
                 match file.read(&mut temp_buf) {
                     Ok(n) if n > 0 => {
                         println!("Read {} bytes from pipe", n);
                         buffer.extend_from_slice(&temp_buf[..n]);
-                        while buffer.len() >= 8 {
-                            let timestamp_bytes: [u8; 8] =
-                                buffer.drain(..8).collect::<Vec<u8>>().try_into().unwrap();
-                            let timestamp = u64::from_le_bytes(timestamp_bytes);
-                            counter += 1;
-                            println!(
-                                "[TRACE #{}] Timestamp: 0x{:016x} ({})",
-                                counter, timestamp, timestamp
-                            );
+                        while buffer.len() >= 24 {
+                            let event_bytes: [u8; 24] =
+                                buffer.drain(..24).collect::<Vec<u8>>().try_into().unwrap();
+
+                            match TraceEvent::from_bytes(&event_bytes) {
+                                Ok(event) => {
+                                    counter += 1;
+                                    // Copy fields to locals to avoid unaligned references
+                                    let x28 = event.x28_value;
+                                    let ts = event.timestamp;
+                                    println!(
+                                        "[TRACE #{}] {:?} - x28: 0x{:016x}, Timestamp: 0x{:016x} ({})",
+                                        counter, event.event_type, x28, ts, ts
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to parse trace event: {:?}", e);
+                                }
+                            }
                         }
                     }
                     Ok(_) => {

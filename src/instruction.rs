@@ -160,6 +160,7 @@ pub trait TrampolineBuilder {
         inst2: u32,
         inst3: u32,
         inst4: u32,
+        event_type: u8,
     ) -> Instructions;
 }
 
@@ -174,23 +175,35 @@ impl TrampolineBuilder for EntryTrampolineBuilder {
         inst2: u32,
         inst3: u32,
         inst4: u32,
+        event_type: u8,
     ) -> Instructions {
         let mut instructions = Instructions::new();
         instructions.join(push_registers_to_stack());
 
-        // タイムスタンプを取得してスタックに保存
-        instructions.push(0xd53be040); // mrs x0, cntvct_el0
-        instructions.push(0xf81f0fe0); // str x0, [sp, #-16]!
+        // スタック確保: sub sp, sp, #32 (24バイト構造体 + 8バイトアライメント)
+        instructions.push(0xd10083ff); // sub sp, sp, #32
 
-        // write(fd, sp, 8) - タイムスタンプをパイプに書き込む
+        // event_type (1バイト) + padding (7バイト) を [sp] に書き込み
+        // x0にevent_typeを設定し、8バイト書き込み（残り7バイトは自動的に0）
+        instructions.push(build_movz(0, event_type as u32, 0));
+        instructions.push(0xf90003e0); // str x0, [sp] - 8バイト書き込み
+
+        // x28レジスタ値を [sp+8] に保存
+        instructions.push(0xf90007fc); // str x28, [sp, #8]
+
+        // タイムスタンプを [sp+16] に保存
+        instructions.push(0xd53be040); // mrs x0, cntvct_el0
+        instructions.push(0xf9000be0); // str x0, [sp, #16]
+
+        // write(pipe_fd, sp, 24)
         instructions.push(build_movz(0, pipe_fd, 0));
-        instructions.push(0x910003e1); // mov x1, sp (タイムスタンプのアドレス)
-        instructions.push(build_movz(2, 8, 0)); // x2 = 8
-        instructions.push(build_movz(8, 64, 0)); // x8 = write
+        instructions.push(0x910003e1); // mov x1, sp
+        instructions.push(build_movz(2, 24, 0)); // x2 = 24
+        instructions.push(build_movz(8, 64, 0)); // x8 = 64 (write)
         instructions.push(0xd4000001); // svc #0
 
-        // スタックをクリーンアップ (timestamp = 16バイト)
-        instructions.push(0x910043ff); // add sp, sp, #16
+        // スタッククリーンアップ: add sp, sp, #32
+        instructions.push(0x910083ff); // add sp, sp, #32
         instructions.join(pop_registers_from_stack());
 
         // Execute all 4 instructions that were overwritten by jump_to_abs (16 bytes total)

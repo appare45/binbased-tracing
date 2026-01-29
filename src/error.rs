@@ -103,3 +103,9 @@ pub enum PipeError {
     #[error("Failed to create enclosing directory")]
     FailedToCreateDirectory(#[source] std::io::Error),
 }
+
+#[derive(Error, Debug)]
+pub enum EventError {
+    #[error("Invalid event type: {0}")]
+    InvalidEventType(u8),
+}
