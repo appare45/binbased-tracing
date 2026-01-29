@@ -93,6 +93,18 @@ pub enum InstrumentError {
 
     #[error("Pipe error")]
     PipeError(#[from] PipeError),
+
+    #[error("DWARF error")]
+    DwarfError(#[from] DwarfError),
+
+    #[error("IO error")]
+    IoError(#[from] std::io::Error),
+
+    #[error("Elf error")]
+    ElfError(#[from] ElfError),
+
+    #[error("Proc error")]
+    ProcError(#[from] ProcError),
 }
 
 #[derive(Error, Debug)]
@@ -117,4 +129,28 @@ pub enum MonitorError {
 
     #[error("Failed to join collector thread")]
     CollectorThreadJoinFailed,
+}
+
+#[derive(Error, Debug)]
+pub enum DwarfError {
+    #[error("DWARF情報が見つかりません")]
+    NoDwarfInfo,
+
+    #[error("runtime.g構造体が見つかりません")]
+    RuntimeGNotFound,
+
+    #[error("goidフィールドが見つかりません")]
+    GoidFieldNotFound,
+
+    #[error("構造体 {0} が見つかりません")]
+    StructNotFound(String),
+
+    #[error("フィールド {field} が構造体 {struct_name} 内に見つかりません")]
+    FieldNotFound { struct_name: String, field: String },
+
+    #[error("DWARF属性が見つかりません")]
+    AttributeNotFound,
+
+    #[error("Gimliエラー")]
+    GimliError(#[from] gimli::Error),
 }

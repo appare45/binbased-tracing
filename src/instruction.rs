@@ -138,6 +138,64 @@ fn build_movk(target: u32, value: u32, shift: u32) -> u32 {
     0b111100101 << 23 | ((shift / 16) & 0b11) << 21 | ((value & 0xFFFF) << 5) | (target & 0x1F)
 }
 
+fn build_mov(rd: u32, rn: u32) -> u32 {
+    // orr xd, xzr, xn
+    // 形式: 1010101000nnnnnn000000111111ddddd
+    0b10101010_00 << 22 | (rn & 0x1F) << 16 | 0b11111 << 5 | (rd & 0x1F)
+}
+
+fn build_ldr_offset(rd: u32, rn: u32, offset: u64) -> u32 {
+    assert!(offset % 8 == 0, "Offset must be a multiple of 8");
+    assert!(offset <= 32760, "Offset must be <= 32760");
+
+    let imm12 = (offset / 8) as u32;
+    // LDR (immediate, unsigned offset): 1111100101imm12nnnnnddddd
+    // size=11 (64-bit), V=0, opc=01
+    0b11111001_01 << 22 | (imm12 & 0xFFF) << 10 | (rn & 0x1F) << 5 | (rd & 0x1F)
+}
+
+fn build_add(rd: u32, rn: u32, rm: u32) -> u32 {
+    // ADD (shifted register): 10001011000mmmmm000000nnnnnddddd
+    0b10001011_00 << 22 | (rm & 0x1F) << 16 | (rn & 0x1F) << 5 | (rd & 0x1F)
+}
+
+fn load_field_from_register(
+    dest_reg: u32,
+    base_reg: u32,
+    offset: u64,
+) -> Instructions {
+    let mut instructions = Instructions::new();
+
+    if offset == 0 {
+        // オフセットが0の場合、直接読み込み
+        instructions.push(build_ldr_offset(dest_reg, base_reg, 0));
+    } else if offset % 8 == 0 && offset <= 32760 {
+        // オフセットが即値範囲内の場合、LDRの即値オフセットを使用
+        instructions.push(build_ldr_offset(dest_reg, base_reg, offset));
+    } else {
+        // オフセットが大きい場合、レジスタ経由で計算
+        // 一時レジスタを選択（dest_regとbase_regを避ける）
+        let temp_reg = if dest_reg != 1 && base_reg != 1 {
+            1
+        } else if dest_reg != 2 && base_reg != 2 {
+            2
+        } else {
+            3
+        };
+
+        // temp = base (ベースレジスタを保存)
+        instructions.push(build_mov(temp_reg, base_reg));
+        // dest = offset
+        instructions.join(build_large_mov(dest_reg, offset));
+        // dest = temp + dest (アドレス計算)
+        instructions.push(build_add(dest_reg, temp_reg, dest_reg));
+        // dest = *dest (フィールド値を読み込み)
+        instructions.push(build_ldr_offset(dest_reg, dest_reg, 0));
+    }
+
+    instructions
+}
+
 #[test]
 fn build_movz_test() {
     assert_eq!(build_movz(0, 0xffff, 0), 0xd29fffe0);
@@ -151,6 +209,55 @@ fn build_movk_test() {
     assert_eq!(build_movk(0, 0x8b0f, 16), 0xf2b161e0);
 }
 
+#[test]
+fn build_mov_test() {
+    // mov x0, x28 (実際は orr x0, xzr, x28)
+    assert_eq!(build_mov(0, 28), 0xaa1c03e0);
+    // mov x1, x28
+    assert_eq!(build_mov(1, 28), 0xaa1c03e1);
+    // mov x2, x3
+    assert_eq!(build_mov(2, 3), 0xaa0303e2);
+}
+
+#[test]
+fn build_ldr_offset_test() {
+    // ldr x0, [x28] (offset=0)
+    assert_eq!(build_ldr_offset(0, 28, 0), 0xf9400380);
+    // ldr x0, [x0] (offset=0)
+    assert_eq!(build_ldr_offset(0, 0, 0), 0xf9400000);
+    // ldr x0, [x28, #152] (goid offset)
+    assert_eq!(build_ldr_offset(0, 28, 152), 0xf9404f80);
+}
+
+#[test]
+fn build_add_test() {
+    // add x0, x1, x0
+    assert_eq!(build_add(0, 1, 0), 0x8b000020);
+    // add x0, x28, x0
+    assert_eq!(build_add(0, 28, 0), 0x8b000380);
+}
+
+#[test]
+fn test_load_field_from_register() {
+    // Test offset == 0: ldr x0, [x28]
+    let inst = load_field_from_register(0, 28, 0);
+    assert_eq!(inst.get(0), Some(0xf9400380)); // ldr x0, [x28]
+
+    // Test offset == 152 (goid): ldr x0, [x28, #152]
+    let inst = load_field_from_register(0, 28, 152);
+    assert_eq!(inst.get(0), Some(0xf9404f80)); // ldr x0, [x28, #152]
+
+    // Test different destination register: ldr x2, [x28, #152]
+    let inst = load_field_from_register(2, 28, 152);
+    assert_eq!(inst.get(0), Some(0xf9404f82)); // ldr x2, [x28, #152]
+
+    // Test large offset (requires register calculation)
+    let inst = load_field_from_register(0, 28, 40000);
+    // Should generate: mov x1, x28; movz x0, ...; add x0, x1, x0; ldr x0, [x0]
+    assert_eq!(inst.get(0), Some(build_mov(1, 28)));
+    // The rest depends on build_large_mov implementation
+}
+
 pub trait TrampolineBuilder {
     fn build(
         &self,
@@ -161,6 +268,7 @@ pub trait TrampolineBuilder {
         inst3: u32,
         inst4: u32,
         event_type: u8,
+        runtime_offsets: &crate::dwarf::RuntimeOffsets,
     ) -> Instructions;
 }
 
@@ -176,6 +284,7 @@ impl TrampolineBuilder for EntryTrampolineBuilder {
         inst3: u32,
         inst4: u32,
         event_type: u8,
+        runtime_offsets: &crate::dwarf::RuntimeOffsets,
     ) -> Instructions {
         let mut instructions = Instructions::new();
         instructions.join(push_registers_to_stack());
@@ -188,8 +297,10 @@ impl TrampolineBuilder for EntryTrampolineBuilder {
         instructions.push(build_movz(0, event_type as u32, 0));
         instructions.push(0xf90003e0); // str x0, [sp] - 8バイト書き込み
 
-        // x28レジスタ値を [sp+8] に保存
-        instructions.push(0xf90007fc); // str x28, [sp, #8]
+        // x28（goroutineポインタ）からgoidを読み取り、x0に格納後、[sp+8]に保存
+        // x28はAArch64のGo runtimeでgoroutineポインタとして使用される
+        instructions.join(load_field_from_register(0, 28, runtime_offsets.goid));
+        instructions.push(0xf90007e0); // str x0, [sp, #8]
 
         // タイムスタンプを [sp+16] に保存
         instructions.push(0xd53be040); // mrs x0, cntvct_el0

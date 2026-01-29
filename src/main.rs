@@ -4,6 +4,7 @@ use std::process::Command;
 use std::process::Stdio;
 
 mod conf;
+mod dwarf;
 mod elf;
 mod error;
 mod event;
@@ -49,7 +50,7 @@ fn main() {
     let plan = instrument::plan_instrumentation(&proc, &analysis, TARGET_SYMBOL, event_tx)
         .expect("Failed to plan instrumentation");
 
-    let inst = instrument::new(proc, plan.targets).expect("Failed to create instrument");
+    let inst = instrument::new(proc, plan.targets, plan.runtime_offsets).expect("Failed to create instrument");
     let proc = inst.instrument().expect("Failed to instrument");
 
     monitor::monitor_process(&proc, is_child, plan.pipes, plan.readers, event_rx)

@@ -1,6 +1,7 @@
 use std::{
     fs::File,
     io::{BufReader, Read},
+    path::PathBuf,
 };
 
 use nix::{sys::wait, unistd};
@@ -44,6 +45,11 @@ impl Proc {
 
     pub fn wait_for_status(&self) -> Result<wait::WaitStatus, ProcError> {
         wait::waitpid(self.pid, None).map_err(ProcError::FailedToWaitPid)
+    }
+
+    pub fn exe_path(&self) -> Result<PathBuf, ProcError> {
+        std::fs::read_link(format!("/proc/{}/exe", self.pid))
+            .map_err(|e| ProcError::IoError(e))
     }
 }
 

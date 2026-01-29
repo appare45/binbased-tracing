@@ -6,7 +6,7 @@ use goblin::{
     strtab::Strtab,
 };
 
-use crate::error::ElfError;
+use crate::{dwarf, error::ElfError};
 
 pub struct Symbol(Sym);
 
@@ -15,6 +15,7 @@ pub type SymbolMap = HashMap<String, Symbol>;
 pub struct ELF {
     pub funcs: SymbolMap,
     load_base: u64,
+    pub runtime_offsets: Option<dwarf::RuntimeOffsets>,
 }
 
 impl ELF {
@@ -36,7 +37,10 @@ pub fn new(file: &[u8]) -> Result<ELF, ElfError> {
                 .map(|ph| ph.p_vaddr)
                 .unwrap_or(0);
 
-            Ok(ELF { funcs, load_base })
+            // Try to load DWARF information (failure is not fatal)
+            let runtime_offsets = dwarf::RuntimeOffsets::from_elf(file).ok();
+
+            Ok(ELF { funcs, load_base, runtime_offsets })
         }
         _ => Err(ElfError::NotAnElfFile),
     }
