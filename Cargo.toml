@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.5.54", features = ["derive"] }
+gimli = "0.31"
 goblin = "0.10.4"
 nix = { version = "0.30.1", features = ["fs", "process", "ptrace", "signal"] }
+object = "0.36"
 thiserror = "2.0.17"
