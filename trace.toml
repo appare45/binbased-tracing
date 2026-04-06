@@ -1,0 +1,3 @@
+targets = [
+    "net/http.serverHandler.ServeHTTP",
+]

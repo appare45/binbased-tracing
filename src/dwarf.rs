@@ -3,6 +3,7 @@ use gimli::{AttributeValue, DebuggingInformationEntry, Dwarf, EndianSlice, RunTi
 use object::{Object, ObjectSection};
 
 /// Go runtime構造体のフィールドオフセット情報
+#[derive(Clone)]
 pub struct RuntimeOffsets {
     pub goid: u64,
     // 将来的に追加予定:

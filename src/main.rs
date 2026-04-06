@@ -1,9 +1,11 @@
 use clap::Parser;
 use clap::Subcommand;
+use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 
 mod conf;
+mod config;
 mod dwarf;
 mod elf;
 mod error;
@@ -27,11 +29,18 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Attach { pid: i32 },
-    Exec { path: String, args: Vec<String> },
+    Attach {
+        pid: i32,
+        #[arg(short, long, default_value = "trace.toml")]
+        config: PathBuf,
+    },
+    Exec {
+        path: String,
+        args: Vec<String>,
+        #[arg(short, long, default_value = "trace.toml")]
+        config: PathBuf,
+    },
 }
-
-const TARGET_SYMBOL: &str = "net/http.serverHandler.ServeHTTP";
 
 #[cfg(not(target_arch = "aarch64"))]
 compile_error!("This crate only supports aarch64 architecture");
@@ -40,35 +49,51 @@ compile_error!("This crate only supports aarch64 architecture");
 fn main() {
     use std::sync::mpsc::channel;
 
-    let (c, proc, is_child) = setup_process().expect("Failed to setup process");
-    let analysis =
-        symbol_analyzer::analyze_function(&proc, TARGET_SYMBOL).expect("Failed to analyze symbol");
+    let (c, proc, is_child, config) = setup_process().expect("Failed to setup process");
 
     // Create channel for trace events
     let (event_tx, event_rx) = channel();
 
-    let plan = instrument::plan_instrumentation(&proc, &analysis, TARGET_SYMBOL, event_tx)
-        .expect("Failed to plan instrumentation");
+    let mut all_pipes = Vec::new();
+    let mut all_readers = Vec::new();
+    let mut runtime_offsets = None;
 
-    let inst = instrument::new(proc, plan.targets, plan.runtime_offsets).expect("Failed to create instrument");
-    let proc = inst.instrument().expect("Failed to instrument");
+    for target_symbol in &config.targets {
+        let analysis = symbol_analyzer::analyze_function(&proc, target_symbol)
+            .expect("Failed to analyze symbol");
 
-    monitor::monitor_process(&proc, is_child, plan.pipes, plan.readers, event_rx)
+        let plan = instrument::plan_instrumentation(&proc, &analysis, target_symbol, event_tx.clone())
+            .expect("Failed to plan instrumentation");
+
+        all_pipes.extend(plan.pipes);
+        all_readers.extend(plan.readers);
+
+        if runtime_offsets.is_none() {
+            runtime_offsets = Some(plan.runtime_offsets);
+        }
+
+        let inst = instrument::new(proc, plan.targets, runtime_offsets.clone().unwrap())
+            .expect("Failed to create instrument");
+        let _ = inst.instrument().expect("Failed to instrument");
+    }
+
+    monitor::monitor_process(&proc, is_child, all_pipes, all_readers, event_rx)
         .expect("Failed to monitor process");
 
     // これをするとdropするタイミングをコンパイルするときにここまで生きていることを知れる
     drop(c);
 }
 
-fn setup_process() -> Result<(conf::Conf, proc::Proc, bool), Box<dyn std::error::Error>> {
-    let (c, is_child) = match Cli::parse().command {
-        Commands::Attach { pid } => {
+fn setup_process() -> Result<(conf::Conf, proc::Proc, bool, config::Config), Box<dyn std::error::Error>> {
+    let cli = Cli::parse();
+    let (c, is_child, config_path) = match cli.command {
+        Commands::Attach { pid, config } => {
             println!(
                 "Attaching another process is not stable since the waiting for pid is not available"
             );
-            (conf::new(nix::unistd::Pid::from_raw(pid), false), false)
+            (conf::new(nix::unistd::Pid::from_raw(pid), false), false, config)
         }
-        Commands::Exec { path, args } => {
+        Commands::Exec { path, args, config } => {
             let mut command = Command::new(path);
             for arg in args {
                 command.arg(arg);
@@ -81,9 +106,11 @@ fn setup_process() -> Result<(conf::Conf, proc::Proc, bool), Box<dyn std::error:
             (
                 conf::new(nix::unistd::Pid::from_raw(pid as i32), true),
                 true,
+                config,
             )
         }
     };
+    let config = config::load(&config_path)?;
     let proc = c.trace()?;
-    Ok((c, proc, is_child))
+    Ok((c, proc, is_child, config))
 }
