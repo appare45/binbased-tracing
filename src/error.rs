@@ -136,12 +136,6 @@ pub enum DwarfError {
     #[error("DWARF情報が見つかりません")]
     NoDwarfInfo,
 
-    #[error("runtime.g構造体が見つかりません")]
-    RuntimeGNotFound,
-
-    #[error("goidフィールドが見つかりません")]
-    GoidFieldNotFound,
-
     #[error("構造体 {0} が見つかりません")]
     StructNotFound(String),
 

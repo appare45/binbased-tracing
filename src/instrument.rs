@@ -35,8 +35,9 @@ pub fn plan_instrumentation(
     let elf_bytes = std::fs::read(&exe_path)?;
     let elf = crate::elf::new(&elf_bytes)?;
 
-    let runtime_offsets = elf.runtime_offsets
-        .ok_or(InstrumentError::DwarfError(crate::error::DwarfError::NoDwarfInfo))?;
+    let runtime_offsets = elf.runtime_offsets.ok_or(InstrumentError::DwarfError(
+        crate::error::DwarfError::NoDwarfInfo,
+    ))?;
 
     let pipe_entry = pipe::Pipe::new(symbol_name, proc.pid, Some("entry"))?;
     let reader_entry = pipe_entry.start_reader(event_tx.clone());
@@ -97,25 +98,21 @@ struct TrampolineAllocated {
 struct TrampolineWriting {
     tracee: ptrace::Stopped,
     targets: Vec<AllocatedTarget>,
-    runtime_offsets: crate::dwarf::RuntimeOffsets,
 }
 
 struct TrampolineWrote {
     tracee: ptrace::Attached,
     targets: Vec<AllocatedTarget>,
-    runtime_offsets: crate::dwarf::RuntimeOffsets,
 }
 
 struct TrampolinePermissionChanging {
     tracee: ptrace::Stopped,
     targets: Vec<AllocatedTarget>,
-    runtime_offsets: crate::dwarf::RuntimeOffsets,
 }
 
 struct TrampolinePermissionChanged {
     tracee: ptrace::Attached,
     targets: Vec<AllocatedTarget>,
-    runtime_offsets: crate::dwarf::RuntimeOffsets,
 }
 
 pub fn new(
@@ -124,7 +121,11 @@ pub fn new(
     runtime_offsets: crate::dwarf::RuntimeOffsets,
 ) -> Result<NotInstrumented, InstrumentError> {
     let tracee = ptrace::Attached::try_from(value)?;
-    Ok(NotInstrumented { tracee, targets, runtime_offsets })
+    Ok(NotInstrumented {
+        tracee,
+        targets,
+        runtime_offsets,
+    })
 }
 
 impl NotInstrumented {
@@ -302,7 +303,6 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
         Ok(TrampolineWriting {
             tracee,
             targets: value.targets,
-            runtime_offsets: value.runtime_offsets,
         })
     }
 }
@@ -314,7 +314,6 @@ impl TryFrom<TrampolineWriting> for TrampolineWrote {
         Ok(TrampolineWrote {
             tracee: ptrace::Attached::try_from(value.tracee)?,
             targets: value.targets,
-            runtime_offsets: value.runtime_offsets,
         })
     }
 }
@@ -326,7 +325,6 @@ impl TryFrom<TrampolineWrote> for TrampolinePermissionChanging {
         Ok(TrampolinePermissionChanging {
             tracee: ptrace::Stopped::try_from(value.tracee)?,
             targets: value.targets,
-            runtime_offsets: value.runtime_offsets,
         })
     }
 }
@@ -359,7 +357,6 @@ impl TryFrom<TrampolinePermissionChanging> for TrampolinePermissionChanged {
         Ok(TrampolinePermissionChanged {
             tracee: ptrace::Attached::try_from(tracee)?,
             targets: value.targets,
-            runtime_offsets: value.runtime_offsets,
         })
     }
 }
