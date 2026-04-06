@@ -2,6 +2,22 @@
 	"name": "Rust",
 	"image": "mcr.microsoft.com/devcontainers/rust:2-1-trixie",
 	"runArgs": [
-		"--cap-add=SYS_PTRACE"
-	]
+		// "--cap-add=SYS_PTRACE"
+	],
+	"mounts": [
+		"source=devcontainer-${devcontainerId}-cargo-cache,target=/usr/local/cargo,type=volume,consistency=cached",
+		"source=${localWorkspaceFolder}/.git,target=${containerWorkspaceFolder}/.git,type=bind,consistency=cached,readonly",
+		"source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
+		"source=claude-code-config,target=/home/vscode/.claude,type=volume"
+	],
+	"postCreateCommand": "sudo chown -R vscode /commandhistory /home/vscode/.claude /usr/local/cargo",
+	"features": {
+		"ghcr.io/devcontainers/features/node:1": {
+			"installYarnUsingApt": false
+		},
+		"ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+	},
+	"containerEnv": {
+		"CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+	}
 }
