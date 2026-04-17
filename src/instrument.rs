@@ -1,36 +1,32 @@
 use crate::{
-    error::InstrumentError, event::TraceEvent, instruction, pipe, proc, ptrace, symbol_analyzer,
+    error::InstrumentError, event::TraceEvent, event_buffer::EventBuffer, instruction, proc,
+    ptrace, symbol_analyzer,
 };
-use std::ffi::CString;
 use std::sync::mpsc::Sender;
-use std::thread::JoinHandle;
 
 const TRAMPOLINE_SIZE: u64 = 1024;
 const SYSCALL_MMAP: u64 = 222;
 const SYSCALL_MPROTECT: u64 = 226;
-const SYSCALL_OPEN: u64 = 56;
 
 pub struct InstrumentTarget {
     pub addr: u64,
     pub builder: Box<dyn instruction::TrampolineBuilder>,
-    pub pipe_path: String,
+    pub buffer_addr: u64,
     pub event_type: u8,
 }
 
 pub struct InstrumentationPlan {
     pub targets: Vec<InstrumentTarget>,
-    pub pipes: Vec<pipe::Pipe>,
-    pub readers: Vec<JoinHandle<u64>>,
+    pub buffers: Vec<EventBuffer>,
     pub runtime_offsets: crate::dwarf::RuntimeOffsets,
 }
 
 pub fn plan_instrumentation(
     proc: &proc::Proc,
     analysis: &symbol_analyzer::FunctionAnalysis,
-    symbol_name: &str,
+    _symbol_name: &str,
     event_tx: Sender<TraceEvent>,
 ) -> Result<InstrumentationPlan, InstrumentError> {
-    // Read ELF file to get DWARF information
     let exe_path = proc.exe_path()?;
     let elf_bytes = std::fs::read(&exe_path)?;
     let elf = crate::elf::new(&elf_bytes)?;
@@ -39,32 +35,31 @@ pub fn plan_instrumentation(
         crate::error::DwarfError::NoDwarfInfo,
     ))?;
 
-    let pipe_entry = pipe::Pipe::new(symbol_name, proc.pid, Some("entry"))?;
-    let reader_entry = pipe_entry.start_reader(event_tx.clone());
+    let mut shm_entry = EventBuffer::create().map_err(InstrumentError::EventBufferError)?;
+    shm_entry.start_reader(event_tx.clone());
 
-    let pipe_end = pipe::Pipe::new(symbol_name, proc.pid, Some("end"))?;
-    let reader_end = pipe_end.start_reader(event_tx);
+    let mut shm_end = EventBuffer::create().map_err(InstrumentError::EventBufferError)?;
+    shm_end.start_reader(event_tx);
 
     let mut targets = vec![InstrumentTarget {
         addr: analysis.entry_addr,
         builder: Box::new(instruction::EntryTrampolineBuilder()),
-        pipe_path: pipe_entry.path().to_string(),
-        event_type: 0, // Entry
+        buffer_addr: shm_entry.ptr() as u64,
+        event_type: 0,
     }];
 
     for ret_addr in &analysis.ret_addrs {
         targets.push(InstrumentTarget {
             addr: *ret_addr,
             builder: Box::new(instruction::EntryTrampolineBuilder()),
-            pipe_path: pipe_end.path().to_string(),
-            event_type: 1, // Return
+            buffer_addr: shm_end.ptr() as u64,
+            event_type: 1,
         });
     }
 
     Ok(InstrumentationPlan {
         targets,
-        pipes: vec![pipe_entry, pipe_end],
-        readers: vec![reader_entry, reader_end],
+        buffers: vec![shm_entry, shm_end],
         runtime_offsets,
     })
 }
@@ -78,7 +73,7 @@ pub struct NotInstrumented {
 struct AllocatedTarget {
     addr: u64,
     trampoline_addr: u64,
-    pipe_fd: u32,
+    buffer_addr: u64,
     builder: Box<dyn instruction::TrampolineBuilder>,
     event_type: u8,
 }
@@ -202,20 +197,6 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
     fn try_from(value: TrampolineAllocating) -> Result<Self, Self::Error> {
         let mut tracee = value.tracee;
 
-        // 適当なデータを置くための領域（ヒープ的な）
-        let (attached, trampoline_stack_addr) = call_svc(
-            tracee,
-            SYSCALL_MMAP,
-            &[
-                0,               // addr hint
-                TRAMPOLINE_SIZE, // Size
-                3,               // PROT_*
-                0x22,            // MAP_PRIVATE | MAP_ANONYMOUS
-                u64::MAX,        // fd = -1
-            ],
-        )?;
-        tracee = ptrace::Stopped::try_from(attached)?;
-
         let mut allocated_targets = Vec::new();
 
         for target in value.targets {
@@ -232,31 +213,10 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
             )?;
             tracee = ptrace::Stopped::try_from(attached)?;
 
-            let binding = CString::new(target.pipe_path.as_str())?;
-            let pipe_path = binding.as_bytes_with_nul();
-            println!(
-                "Writing pipe path to 0x{:x}: {:?}",
-                trampoline_stack_addr, target.pipe_path
-            );
-            tracee.write_bytes(trampoline_stack_addr, pipe_path)?;
-            println!(
-                "Wrote {} bytes to 0x{:x}-0x{:x}",
-                pipe_path.len(),
-                trampoline_stack_addr,
-                trampoline_stack_addr + pipe_path.len() as u64
-            );
-
-            let (attached, pipe_fd) = call_svc(
-                tracee,
-                SYSCALL_OPEN,
-                &[0xFFFFFFFFFFFFFF9C, trampoline_stack_addr, 0x801],
-            )?;
-            tracee = ptrace::Stopped::try_from(attached)?;
-
             allocated_targets.push(AllocatedTarget {
                 addr: target.addr,
                 trampoline_addr,
-                pipe_fd: pipe_fd.try_into()?,
+                buffer_addr: target.buffer_addr,
                 builder: target.builder,
                 event_type: target.event_type,
             });
@@ -288,7 +248,7 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
 
             // トランポリンコードを構築して書き込み
             let trampoline = target.builder.build(
-                target.pipe_fd,
+                target.buffer_addr,
                 target.addr,
                 inst1,
                 inst2,

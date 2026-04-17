@@ -1,18 +1,16 @@
 use crate::error::MonitorError;
 use crate::event::TraceEvent;
-use crate::pipe::Pipe;
 use crate::proc::Proc;
+use crate::event_buffer::EventBuffer;
 use crate::trace_collector::TraceCollector;
 use nix::sys::wait;
 use std::sync::mpsc::{self, Receiver};
-use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::thread;
 
 pub fn monitor_process(
     proc: &Proc,
     is_child: bool,
-    pipes: Vec<Pipe>,
-    readers: Vec<JoinHandle<u64>>,
+    buffers: Vec<EventBuffer>,
     event_rx: Receiver<TraceEvent>,
 ) -> Result<(), MonitorError> {
     println!("Instrumentation complete. Waiting for program events...");
@@ -23,18 +21,6 @@ pub fn monitor_process(
             collector.process_event(event);
         }
         collector
-    });
-
-    // パイプリーダーの終了を監視するチャネル
-    let (reader_done_tx, reader_done_rx) = mpsc::channel();
-
-    // パイプリーダーの終了を監視するスレッド
-    thread::spawn(move || {
-        for reader in readers {
-            let _ = reader.join();
-        }
-        println!("All pipe readers finished");
-        let _ = reader_done_tx.send(());
     });
 
     // プロセス状態監視スレッド
@@ -65,21 +51,9 @@ pub fn monitor_process(
         let _ = proc_done_tx.send(());
     });
 
-    // パイプリーダーまたはプロセスのどちらかが終了したら継続
-    loop {
-        if reader_done_rx.try_recv().is_ok() {
-            println!("Pipes closed, stopping program...");
-            break;
-        }
-        if proc_done_rx.try_recv().is_ok() {
-            println!("Program ended");
-            break;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
+    let _ = proc_done_rx.recv();
 
-    // パイプをクリーンアップ
-    drop(pipes);
+    drop(buffers);
 
     // コレクタースレッドの終了を待つ
     collector_handle

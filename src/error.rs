@@ -94,6 +94,9 @@ pub enum InstrumentError {
     #[error("Pipe error")]
     PipeError(#[from] PipeError),
 
+    #[error("Event buffer error")]
+    EventBufferError(#[source] EventBufferError),
+
     #[error("DWARF error")]
     DwarfError(#[from] DwarfError),
 
@@ -132,7 +135,7 @@ pub enum MonitorError {
 }
 
 #[derive(Error, Debug)]
-pub enum ShmError {
+pub enum EventBufferError {
     #[error("Invalid name for memfd")]
     InvalidName,
 

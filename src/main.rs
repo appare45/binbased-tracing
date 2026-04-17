@@ -16,7 +16,7 @@ mod maps;
 mod monitor;
 mod pipe;
 mod proc;
-mod shm;
+mod event_buffer;
 mod ptrace;
 mod symbol_analyzer;
 mod trace_collector;
@@ -56,8 +56,7 @@ fn main() {
     let (event_tx, event_rx) = channel();
 
     let mut all_targets = Vec::new();
-    let mut all_pipes = Vec::new();
-    let mut all_readers = Vec::new();
+    let mut all_buffers = Vec::new();
     let mut runtime_offsets = None;
 
     for target_symbol in &config.targets {
@@ -68,8 +67,7 @@ fn main() {
             .expect("Failed to plan instrumentation");
 
         all_targets.extend(plan.targets);
-        all_pipes.extend(plan.pipes);
-        all_readers.extend(plan.readers);
+        all_buffers.extend(plan.buffers);
 
         if runtime_offsets.is_none() {
             runtime_offsets = Some(plan.runtime_offsets);
@@ -80,7 +78,7 @@ fn main() {
         .expect("Failed to create instrument");
     let proc = inst.instrument().expect("Failed to instrument");
 
-    monitor::monitor_process(&proc, is_child, all_pipes, all_readers, event_rx)
+    monitor::monitor_process(&proc, is_child, all_buffers, event_rx)
         .expect("Failed to monitor process");
 
     // これをするとdropするタイミングをコンパイルするときにここまで生きていることを知れる
