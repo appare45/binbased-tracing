@@ -16,6 +16,7 @@ mod maps;
 mod monitor;
 mod pipe;
 mod proc;
+mod shm;
 mod ptrace;
 mod symbol_analyzer;
 mod trace_collector;
@@ -54,6 +55,7 @@ fn main() {
     // Create channel for trace events
     let (event_tx, event_rx) = channel();
 
+    let mut all_targets = Vec::new();
     let mut all_pipes = Vec::new();
     let mut all_readers = Vec::new();
     let mut runtime_offsets = None;
@@ -65,17 +67,18 @@ fn main() {
         let plan = instrument::plan_instrumentation(&proc, &analysis, target_symbol, event_tx.clone())
             .expect("Failed to plan instrumentation");
 
+        all_targets.extend(plan.targets);
         all_pipes.extend(plan.pipes);
         all_readers.extend(plan.readers);
 
         if runtime_offsets.is_none() {
             runtime_offsets = Some(plan.runtime_offsets);
         }
-
-        let inst = instrument::new(proc, plan.targets, runtime_offsets.clone().unwrap())
-            .expect("Failed to create instrument");
-        let _ = inst.instrument().expect("Failed to instrument");
     }
+
+    let inst = instrument::new(proc, all_targets, runtime_offsets.unwrap())
+        .expect("Failed to create instrument");
+    let proc = inst.instrument().expect("Failed to instrument");
 
     monitor::monitor_process(&proc, is_child, all_pipes, all_readers, event_rx)
         .expect("Failed to monitor process");
@@ -91,6 +94,7 @@ fn setup_process() -> Result<(conf::Conf, proc::Proc, bool, config::Config), Box
             println!(
                 "Attaching another process is not stable since the waiting for pid is not available"
             );
+            println!("Attached to process with PID: {}", pid);
             (conf::new(nix::unistd::Pid::from_raw(pid), false), false, config)
         }
         Commands::Exec { path, args, config } => {
@@ -103,6 +107,7 @@ fn setup_process() -> Result<(conf::Conf, proc::Proc, bool, config::Config), Box
                 .stdout(Stdio::inherit())
                 .spawn()?
                 .id();
+            println!("Spawned process with PID: {}", pid);
             (
                 conf::new(nix::unistd::Pid::from_raw(pid as i32), true),
                 true,
