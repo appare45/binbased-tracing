@@ -1,6 +1,8 @@
 {
 	"name": "Rust",
-	"image": "mcr.microsoft.com/devcontainers/rust:2-1-trixie",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
 	"runArgs": [
 		// "--cap-add=SYS_PTRACE"
 	],

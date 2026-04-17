@@ -1,3 +1,4 @@
 targets = [
     "net/http.serverHandler.ServeHTTP",
+    "main.(*Server).handleHealth"
 ]
