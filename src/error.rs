@@ -132,6 +132,21 @@ pub enum MonitorError {
 }
 
 #[derive(Error, Debug)]
+pub enum ShmError {
+    #[error("Invalid name for memfd")]
+    InvalidName,
+
+    #[error("memfd_create failed: {0}")]
+    MemfdCreateFailed(#[source] nix::errno::Errno),
+
+    #[error("ftruncate failed: {0}")]
+    FtruncateFailed(#[source] nix::errno::Errno),
+
+    #[error("mmap failed: {0}")]
+    MmapFailed(#[source] nix::errno::Errno),
+}
+
+#[derive(Error, Debug)]
 pub enum DwarfError {
     #[error("DWARF情報が見つかりません")]
     NoDwarfInfo,
