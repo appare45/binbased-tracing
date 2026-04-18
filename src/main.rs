@@ -1,28 +1,16 @@
+use std::sync::Arc;
+use binbased_tracing::{config, event, event_buffer, instrument, monitor, proc};
 use clap::Parser;
 use clap::Subcommand;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 
-mod conf;
-mod config;
-mod dwarf;
-mod elf;
-mod error;
-mod event;
-mod instruction;
-mod instrument;
-mod maps;
-mod monitor;
-mod proc;
-mod event_buffer;
-mod ptrace;
-mod symbol_analyzer;
-mod trace_collector;
-
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
+    #[arg(short, long, default_value = "trace.toml")]
+    config: PathBuf,
     #[command(subcommand)]
     command: Commands,
 }
@@ -31,14 +19,10 @@ struct Cli {
 enum Commands {
     Attach {
         pid: i32,
-        #[arg(short, long, default_value = "trace.toml")]
-        config: PathBuf,
     },
     Exec {
         path: String,
         args: Vec<String>,
-        #[arg(short, long, default_value = "trace.toml")]
-        config: PathBuf,
     },
 }
 
@@ -47,75 +31,44 @@ compile_error!("This crate only supports aarch64 architecture");
 
 #[cfg(target_arch = "aarch64")]
 fn main() {
-    use std::collections::HashMap;
-    use std::sync::mpsc::channel;
-    use event::{SymbolId, SymbolInfo};
+    let cli = Cli::parse();
+    let config = config::load(&cli.config).expect("Failed to load config");
+    let (proc, buffer, event_rx) = setup_process(cli).expect("Failed to setup process");
+    let buffer = Arc::new(buffer);
 
-    let (c, proc, is_child, config, mut buffer) = setup_process().expect("Failed to setup process");
-
-    let (event_tx, event_rx) = channel();
-
-    let mut all_targets = Vec::new();
-    let mut runtime_offsets = None;
-    let mut symbol_map: HashMap<SymbolId, SymbolInfo> = HashMap::new();
-
-    for (idx, target_symbol) in config.targets.iter().enumerate() {
-        let symbol_id = SymbolId(idx as u16);
-        let analysis = symbol_analyzer::analyze_function(&proc, target_symbol)
-            .expect("Failed to analyze symbol");
-
-        let plan = instrument::plan_instrumentation(
-            &proc,
-            &analysis,
-            &mut buffer,
-            symbol_id,
-            event_tx.clone(),
-        )
-        .expect("Failed to plan instrumentation");
-
-        all_targets.extend(plan.targets);
-
-        if runtime_offsets.is_none() {
-            runtime_offsets = Some(plan.runtime_offsets);
-        }
-
-        symbol_map.insert(symbol_id, SymbolInfo { name: target_symbol.clone() });
+    let mut inst = instrument::Instrumenter::new(proc).expect("Failed to create instrumenter");
+    let mut registry = event::TargetRegistry::new();
+    for target in &config.targets {
+        let analysis = target.analyze(&inst.proc).expect("Failed to analyze function");
+        let id = registry.add(target.name.clone());
+        inst = inst.add_target(&analysis, Arc::clone(&buffer), id).expect("Failed to add target");
     }
 
-    let inst = instrument::new(proc, all_targets, runtime_offsets.unwrap())
-        .expect("Failed to create instrument");
-    let proc = inst.instrument().expect("Failed to instrument");
-
-    monitor::monitor_process(&proc, is_child, buffer, event_rx, symbol_map)
-        .expect("Failed to monitor process");
-
-    drop(c);
+    monitor::monitor_process(
+        inst.proc,
+        buffer,
+        event_rx,
+        registry,
+    )
+    .expect("Failed to monitor process");
 }
 
-fn setup_process() -> Result<
-    (conf::Conf, proc::Proc, bool, config::Config, event_buffer::EventBuffer),
+fn setup_process(cli: Cli) -> Result<
+    (proc::Proc, event_buffer::EventBuffer, event_buffer::EventReceiver),
     Box<dyn std::error::Error>,
 > {
-    use event_buffer::EventBuffer;
-
-    let cli = Cli::parse();
+    let (buffer, event_rx) = event_buffer::EventBuffer::create()?;
 
     match cli.command {
-        Commands::Attach { pid, config } => {
+        Commands::Attach { pid } => {
             println!(
                 "Attaching another process is not stable since the waiting for pid is not available"
             );
             println!("Attached to process with PID: {}", pid);
-            let config = config::load(&config)?;
-            let c = conf::new(nix::unistd::Pid::from_raw(pid), false);
-            let proc = c.trace()?;
-            let buffer = EventBuffer::create()?;
-            Ok((c, proc, false, config, buffer))
+            let proc = proc::new(nix::unistd::Pid::from_raw(pid), false)?;
+            Ok((proc, buffer, event_rx))
         }
-        Commands::Exec { path, args, config } => {
-            let config = config::load(&config)?;
-            let buffer = EventBuffer::create()?;
-
+        Commands::Exec { path, args } => {
             let mut command = Command::new(path);
             for arg in args {
                 command.arg(arg);
@@ -128,9 +81,8 @@ fn setup_process() -> Result<
                 .id();
             println!("Spawned process with PID: {}", pid);
 
-            let c = conf::new(nix::unistd::Pid::from_raw(pid as i32), true);
-            let proc = c.trace()?;
-            Ok((c, proc, true, config, buffer))
+            let proc = proc::new(nix::unistd::Pid::from_raw(pid as i32), true)?;
+            Ok((proc, buffer, event_rx))
         }
     }
 }

@@ -2,7 +2,7 @@ use std::num::NonZeroUsize;
 use std::os::fd::{AsFd, AsRawFd, OwnedFd, RawFd};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -13,6 +13,8 @@ use nix::unistd::ftruncate;
 
 use crate::error::EventBufferError;
 use crate::event::TraceEvent;
+
+pub type EventReceiver = Receiver<TraceEvent>;
 
 const BUFFER_SIZE: usize = 16384;
 pub const BUFFER_CAPACITY: u64 = 512;
@@ -29,7 +31,7 @@ pub struct EventBuffer {
 unsafe impl Send for EventBuffer {}
 
 impl EventBuffer {
-    pub fn create() -> Result<Self, EventBufferError> {
+    pub fn create() -> Result<(Self, EventReceiver), EventBufferError> {
         // O_CLOEXEC なしで作成し、子プロセスに fd を引き継ぐ
         let fd = memfd_create(c"tracer_shm", MFdFlags::empty()).map_err(EventBufferError::MemfdCreateFailed)?;
 
@@ -49,19 +51,22 @@ impl EventBuffer {
 
         unsafe { ptr::write_volatile(ptr.cast().as_ptr(), 0u64) };
 
-        Ok(Self {
+        let (tx, rx) = mpsc::channel();
+        let mut buffer = Self {
             ptr: ptr.cast(),
             fd,
             stop: Arc::new(AtomicBool::new(false)),
             reader: None,
-        })
+        };
+        buffer.start_reader(tx);
+        Ok((buffer, rx))
     }
 
     pub fn fd(&self) -> RawFd {
         self.fd.as_fd().as_raw_fd()
     }
 
-    pub fn start_reader(&mut self, tx: Sender<TraceEvent>) {
+    fn start_reader(&mut self, tx: Sender<TraceEvent>) {
         if self.reader.is_some() {
             return;
         }

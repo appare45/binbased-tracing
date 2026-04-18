@@ -1,9 +1,33 @@
+use std::collections::HashMap;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct SymbolId(pub u16);
+pub struct TargetId(pub u16);
 
-pub struct SymbolInfo {
+pub struct Target {
     pub name: String,
+}
+
+pub struct TargetRegistry {
+    inner: HashMap<TargetId, Target>,
+    next_id: u16,
+}
+
+impl TargetRegistry {
+    pub fn new() -> Self {
+        Self { inner: HashMap::new(), next_id: 0 }
+    }
+
+    pub fn add(&mut self, name: String) -> TargetId {
+        let id = TargetId(self.next_id);
+        self.next_id += 1;
+        self.inner.insert(id, Target { name });
+        id
+    }
+
+    pub fn name(&self, id: TargetId) -> &str {
+        self.inner.get(&id).map(|t| t.name.as_str()).unwrap_or("<unknown>")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,7 +43,7 @@ pub enum EventType {
 pub struct TraceEvent {
     pub event_type: EventType,
     pub _padding: [u8; 5],
-    pub symbol_id: SymbolId,
+    pub target_id: TargetId,
     pub goroutine: u64,
     pub timestamp: u64,
 }

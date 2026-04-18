@@ -1,9 +1,29 @@
 use serde::Deserialize;
 use std::path::Path;
 
+use crate::{proc::Proc, symbol_analyzer::{self, FunctionAnalysis}, error::ProcError};
+
+#[derive(Debug)]
+pub struct Target {
+    pub name: String,
+}
+
+impl Target {
+    pub fn analyze(&self, proc: &Proc) -> Result<FunctionAnalysis, ProcError> {
+        symbol_analyzer::analyze_function(proc, &self.name)
+    }
+}
+
+impl<'de> Deserialize<'de> for Target {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(d)?;
+        Ok(Target { name })
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub targets: Vec<String>,
+    pub targets: Vec<Target>,
 }
 
 pub fn load(path: &Path) -> Result<Config, ConfigError> {

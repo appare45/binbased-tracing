@@ -102,6 +102,9 @@ pub enum InstrumentError {
 
     #[error("Proc error")]
     ProcError(#[from] ProcError),
+
+    #[error("EventBuffer error")]
+    EventBufferError(#[from] EventBufferError),
 }
 
 #[derive(Error, Debug)]

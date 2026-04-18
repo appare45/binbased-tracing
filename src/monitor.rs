@@ -1,36 +1,34 @@
+use std::sync::Arc;
 use crate::error::MonitorError;
-use crate::event::{SymbolId, SymbolInfo, TraceEvent};
+use crate::event::TargetRegistry;
+use crate::event_buffer::{EventBuffer, EventReceiver};
 use crate::proc::Proc;
-use crate::event_buffer::EventBuffer;
 use crate::trace_collector::TraceCollector;
 use nix::sys::wait;
-use std::collections::HashMap;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc;
 use std::thread;
 
 pub fn monitor_process(
-    proc: &Proc,
-    is_child: bool,
-    buffer: EventBuffer,
-    event_rx: Receiver<TraceEvent>,
-    symbol_map: HashMap<SymbolId, SymbolInfo>,
+    proc: Proc,
+    buffer: Arc<EventBuffer>,
+    event_rx: EventReceiver,
+    registry: TargetRegistry,
 ) -> Result<(), MonitorError> {
     println!("Instrumentation complete. Waiting for program events...");
 
     let collector_handle = thread::spawn(move || {
-        let mut collector = TraceCollector::new(symbol_map);
+        let mut collector = TraceCollector::new(registry);
         while let Ok(event) = event_rx.recv() {
             collector.process_event(event);
         }
         collector
     });
 
-    // プロセス状態監視スレッド
-    let proc = *proc; // Copyなのでデリファレンスでコピー
+    let pid = proc.pid;
     let (proc_done_tx, proc_done_rx) = mpsc::channel();
     thread::spawn(move || {
         loop {
-            match proc.wait_for_status() {
+            match wait::waitpid(pid, None) {
                 Ok(status) => match status {
                     wait::WaitStatus::Exited(_, code) => {
                         println!("Program exited with {code}");
@@ -43,10 +41,8 @@ pub fn monitor_process(
                     status => println!("{status:?}"),
                 },
                 Err(err) => {
-                    if is_child {
-                        println!("{err:?}");
-                        break;
-                    }
+                    println!("{err:?}");
+                    break;
                 }
             };
         }

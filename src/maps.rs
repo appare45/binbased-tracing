@@ -55,6 +55,24 @@ impl TryFrom<&str> for MemMap {
     }
 }
 
+/// hint_addrの近くで空き領域を探す。見つけた領域をregionsに追加して次回の衝突を防ぐ。
+pub fn find_free_region(regions: &mut Vec<(u64, u64)>, hint_addr: u64, size: u64) -> u64 {
+    let page = 0x1000u64;
+    regions.sort_unstable_by_key(|r| r.0);
+
+    let mut candidate = (hint_addr + page - 1) & !(page - 1);
+    for &(start, end) in regions.iter() {
+        if candidate + size <= start {
+            break;
+        }
+        if end > candidate {
+            candidate = (end + page - 1) & !(page - 1);
+        }
+    }
+    regions.push((candidate, candidate + size));
+    candidate
+}
+
 /// 行のイテレータを受け取り、パースできたMemMapのイテレータを返す
 pub fn parse_maps<R: BufRead>(reader: R) -> impl Iterator<Item = MemMap> {
     BufReader::new(reader)

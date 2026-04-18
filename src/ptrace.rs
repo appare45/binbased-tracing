@@ -49,13 +49,30 @@ impl Stopped {
         addr: u64,
         val: instruction::Instructions,
     ) -> Result<instruction::Instructions, PtraceError> {
-        let val: Vec<i64> = val.into();
-        let mut saved = Vec::with_capacity(val.len());
-        for (i, &instr) in val.iter().enumerate() {
-            let offset = (i as u64) * 8;
-            saved.push(self.read(addr + offset)?);
-            self.write_one(addr + offset, instr)?;
+        let len = val.len();
+        if len == 0 {
+            return Ok(instruction::Instructions::new());
         }
+
+        let num_words = (len + 1) / 2; // 奇数命令数でも切り上げ
+        let mut saved = Vec::with_capacity(num_words);
+
+        for i in 0..num_words {
+            let offset = (i as u64) * 8;
+            let word = self.read(addr + offset)?;
+            saved.push(word);
+
+            let lo = val.get(i * 2).unwrap() as i64;
+            let hi = if let Some(h) = val.get(i * 2 + 1) {
+                h as i64
+            } else {
+                // 奇数個の最後: 上位4バイトは元の値を保持（read-modify-write）
+                (word >> 32) & 0xFFFFFFFF
+            };
+            let new_word = (hi << 32) | (lo & 0xFFFFFFFF);
+            self.write_one(addr + offset, new_word)?;
+        }
+
         Ok(saved.into())
     }
 
