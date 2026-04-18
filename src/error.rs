@@ -91,12 +91,6 @@ pub enum InstrumentError {
     #[error("Failed to convert u64 into u32")]
     Overflow(#[from] std::num::TryFromIntError),
 
-    #[error("Pipe error")]
-    PipeError(#[from] PipeError),
-
-    #[error("Event buffer error")]
-    EventBufferError(#[source] EventBufferError),
-
     #[error("DWARF error")]
     DwarfError(#[from] DwarfError),
 
@@ -111,21 +105,6 @@ pub enum InstrumentError {
 }
 
 #[derive(Error, Debug)]
-pub enum PipeError {
-    #[error("Failed to make fifo")]
-    FailedToMkfifo(#[source] nix::errno::Errno),
-
-    #[error("Failed to create enclosing directory")]
-    FailedToCreateDirectory(#[source] std::io::Error),
-}
-
-#[derive(Error, Debug)]
-pub enum EventError {
-    #[error("Invalid event type: {0}")]
-    InvalidEventType(u8),
-}
-
-#[derive(Error, Debug)]
 pub enum MonitorError {
     #[error("Process error")]
     ProcError(#[from] ProcError),
@@ -136,9 +115,6 @@ pub enum MonitorError {
 
 #[derive(Error, Debug)]
 pub enum EventBufferError {
-    #[error("Invalid name for memfd")]
-    InvalidName,
-
     #[error("memfd_create failed: {0}")]
     MemfdCreateFailed(#[source] nix::errno::Errno),
 

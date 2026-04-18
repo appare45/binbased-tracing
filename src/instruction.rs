@@ -261,7 +261,7 @@ fn test_load_field_from_register() {
 pub trait TrampolineBuilder {
     fn build(
         &self,
-        pipe_fd: u32,
+        buffer_addr: u64,
         replaced_addr: u64,
         inst1: u32,
         inst2: u32,
@@ -277,7 +277,7 @@ pub struct EntryTrampolineBuilder();
 impl TrampolineBuilder for EntryTrampolineBuilder {
     fn build(
         &self,
-        pipe_fd: u32,
+        buffer_addr: u64,
         replaced_addr: u64,
         inst1: u32,
         inst2: u32,
@@ -306,12 +306,28 @@ impl TrampolineBuilder for EntryTrampolineBuilder {
         instructions.push(0xd53be040); // mrs x0, cntvct_el0
         instructions.push(0xf9000be0); // str x0, [sp, #16]
 
-        // write(pipe_fd, sp, 24)
-        instructions.push(build_movz(0, pipe_fd, 0));
-        instructions.push(0x910003e1); // mov x1, sp
-        instructions.push(build_movz(2, 24, 0)); // x2 = 24
-        instructions.push(build_movz(8, 64, 0)); // x8 = 64 (write)
-        instructions.push(0xd4000001); // svc #0
+        // x9 = buffer_addr
+        instructions.join(build_large_mov(9, buffer_addr));
+        // x10 = write_pos (Load-Acquire)
+        instructions.push(0xc8dffd2a); // ldar x10, [x9]
+        // x11 = idx = write_pos & 127
+        instructions.push(0x9240194b); // and x11, x10, #127
+        // x12 = idx * 24 = idx * 16 + idx * 8
+        instructions.push(0xd37ced6c); // lsl x12, x11, #4
+        instructions.push(0x8b0b0d8c); // add x12, x12, x11, lsl #3
+        // x12 = buffer_addr + 64 + idx * 24
+        instructions.push(0x8b09018c); // add x12, x12, x9
+        instructions.push(0x9101018c); // add x12, x12, #64
+        // TraceEvent (24バイト) をスタックから書き込み
+        instructions.push(0xf94003ed); // ldr x13, [sp]
+        instructions.push(0xf900018d); // str x13, [x12]
+        instructions.push(0xf94007ed); // ldr x13, [sp, #8]
+        instructions.push(0xf900058d); // str x13, [x12, #8]
+        instructions.push(0xf9400bed); // ldr x13, [sp, #16]
+        instructions.push(0xf900098d); // str x13, [x12, #16]
+        // write_pos++ (Store-Release)
+        instructions.push(0x9100054a); // add x10, x10, #1
+        instructions.push(0xc89ffd2a); // stlr x10, [x9]
 
         // スタッククリーンアップ: add sp, sp, #32
         instructions.push(0x910083ff); // add sp, sp, #32

@@ -61,10 +61,6 @@ impl EventBuffer {
         self.fd.as_fd().as_raw_fd()
     }
 
-    pub fn ptr(&self) -> *mut u8 {
-        self.ptr.as_ptr()
-    }
-
     pub fn start_reader(&mut self, tx: Sender<TraceEvent>) {
         let ptr_addr = self.ptr.as_ptr() as usize;
         let stop = Arc::clone(&self.stop);

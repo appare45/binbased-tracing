@@ -11,7 +11,7 @@ const SYSCALL_MPROTECT: u64 = 226;
 pub struct InstrumentTarget {
     pub addr: u64,
     pub builder: Box<dyn instruction::TrampolineBuilder>,
-    pub buffer_addr: u64,
+    pub buffer_fd: std::os::unix::io::RawFd,
     pub event_type: u8,
 }
 
@@ -25,6 +25,7 @@ pub fn plan_instrumentation(
     proc: &proc::Proc,
     analysis: &symbol_analyzer::FunctionAnalysis,
     _symbol_name: &str,
+    mut buffers: Vec<EventBuffer>,
     event_tx: Sender<TraceEvent>,
 ) -> Result<InstrumentationPlan, InstrumentError> {
     let exe_path = proc.exe_path()?;
@@ -35,31 +36,31 @@ pub fn plan_instrumentation(
         crate::error::DwarfError::NoDwarfInfo,
     ))?;
 
-    let mut shm_entry = EventBuffer::create().map_err(InstrumentError::EventBufferError)?;
-    shm_entry.start_reader(event_tx.clone());
-
-    let mut shm_end = EventBuffer::create().map_err(InstrumentError::EventBufferError)?;
-    shm_end.start_reader(event_tx);
+    // buffers[0] = entry, buffers[1..] = ret命令（順に割り当て）
+    // child_buffer_addr は instrument フェーズで ptrace 経由の mmap により決定する
+    buffers[0].start_reader(event_tx.clone());
 
     let mut targets = vec![InstrumentTarget {
         addr: analysis.entry_addr,
         builder: Box::new(instruction::EntryTrampolineBuilder()),
-        buffer_addr: shm_entry.ptr() as u64,
+        buffer_fd: buffers[0].fd(),
         event_type: 0,
     }];
 
-    for ret_addr in &analysis.ret_addrs {
+    for (i, ret_addr) in analysis.ret_addrs.iter().enumerate() {
+        let buf_idx = 1 + i;
+        buffers[buf_idx].start_reader(event_tx.clone());
         targets.push(InstrumentTarget {
             addr: *ret_addr,
             builder: Box::new(instruction::EntryTrampolineBuilder()),
-            buffer_addr: shm_end.ptr() as u64,
+            buffer_fd: buffers[buf_idx].fd(),
             event_type: 1,
         });
     }
 
     Ok(InstrumentationPlan {
         targets,
-        buffers: vec![shm_entry, shm_end],
+        buffers,
         runtime_offsets,
     })
 }
@@ -73,7 +74,7 @@ pub struct NotInstrumented {
 struct AllocatedTarget {
     addr: u64,
     trampoline_addr: u64,
-    buffer_addr: u64,
+    child_buffer_addr: u64,
     builder: Box<dyn instruction::TrampolineBuilder>,
     event_type: u8,
 }
@@ -161,7 +162,7 @@ fn call_svc(
 
     // 引数設定
     for (i, v) in params.iter().enumerate() {
-        if regs.regs.len() < i {
+        if regs.regs.len() <= i {
             break;
         }
         regs.regs[i] = *v;
@@ -205,10 +206,26 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
                 SYSCALL_MMAP,
                 &[
                     0,               // addr hint
-                    TRAMPOLINE_SIZE, // Size
-                    3,               // PROT_*
+                    TRAMPOLINE_SIZE, // size
+                    3,               // PROT_READ | PROT_WRITE
                     0x22,            // MAP_PRIVATE | MAP_ANONYMOUS
                     u64::MAX,        // fd = -1
+                ],
+            )?;
+            tracee = ptrace::Stopped::try_from(attached)?;
+
+            // バッファ用 mmap を子プロセス内で実行（MAP_SHARED でバッファ fd をマップ）
+            const BUFFER_SIZE: u64 = 4096;
+            let (attached, child_buffer_addr) = call_svc(
+                tracee,
+                SYSCALL_MMAP,
+                &[
+                    0,                        // addr hint
+                    BUFFER_SIZE,              // size
+                    3,                        // PROT_READ | PROT_WRITE
+                    0x01,                     // MAP_SHARED
+                    target.buffer_fd as u64,  // memfd fd
+                    0,                        // offset
                 ],
             )?;
             tracee = ptrace::Stopped::try_from(attached)?;
@@ -216,7 +233,7 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
             allocated_targets.push(AllocatedTarget {
                 addr: target.addr,
                 trampoline_addr,
-                buffer_addr: target.buffer_addr,
+                child_buffer_addr,
                 builder: target.builder,
                 event_type: target.event_type,
             });
@@ -248,7 +265,7 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
 
             // トランポリンコードを構築して書き込み
             let trampoline = target.builder.build(
-                target.buffer_addr,
+                target.child_buffer_addr,
                 target.addr,
                 inst1,
                 inst2,

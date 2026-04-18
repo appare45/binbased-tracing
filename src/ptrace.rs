@@ -59,16 +59,6 @@ impl Stopped {
         Ok(saved.into())
     }
 
-    pub fn write_bytes(&self, addr: u64, data: &[u8]) -> Result<(), PtraceError> {
-        for (i, chunk) in data.chunks(8).enumerate() {
-            let mut buf = [0u8; 8];
-            buf[..chunk.len()].copy_from_slice(chunk);
-            let value = i64::from_le_bytes(buf);
-            let offset = (i as u64) * 8;
-            self.write_one(addr + offset, value)?;
-        }
-        Ok(())
-    }
 }
 
 impl TryFrom<Stopped> for Attached {
