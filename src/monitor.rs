@@ -1,22 +1,24 @@
 use crate::error::MonitorError;
-use crate::event::TraceEvent;
+use crate::event::{SymbolId, SymbolInfo, TraceEvent};
 use crate::proc::Proc;
 use crate::event_buffer::EventBuffer;
 use crate::trace_collector::TraceCollector;
 use nix::sys::wait;
+use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
 pub fn monitor_process(
     proc: &Proc,
     is_child: bool,
-    buffers: Vec<EventBuffer>,
+    buffer: EventBuffer,
     event_rx: Receiver<TraceEvent>,
+    symbol_map: HashMap<SymbolId, SymbolInfo>,
 ) -> Result<(), MonitorError> {
     println!("Instrumentation complete. Waiting for program events...");
 
     let collector_handle = thread::spawn(move || {
-        let mut collector = TraceCollector::new();
+        let mut collector = TraceCollector::new(symbol_map);
         while let Ok(event) = event_rx.recv() {
             collector.process_event(event);
         }
@@ -53,7 +55,7 @@ pub fn monitor_process(
 
     let _ = proc_done_rx.recv();
 
-    drop(buffers);
+    drop(buffer);
 
     // コレクタースレッドの終了を待つ
     collector_handle

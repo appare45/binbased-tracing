@@ -1,5 +1,5 @@
 use crate::{
-    error::InstrumentError, event::TraceEvent, event_buffer::EventBuffer, instruction, proc,
+    error::InstrumentError, event::{SymbolId, TraceEvent}, event_buffer::EventBuffer, instruction, proc,
     ptrace, symbol_analyzer,
 };
 use std::sync::mpsc::Sender;
@@ -13,19 +13,19 @@ pub struct InstrumentTarget {
     pub builder: Box<dyn instruction::TrampolineBuilder>,
     pub buffer_fd: std::os::unix::io::RawFd,
     pub event_type: u8,
+    pub symbol_id: SymbolId,
 }
 
 pub struct InstrumentationPlan {
     pub targets: Vec<InstrumentTarget>,
-    pub buffers: Vec<EventBuffer>,
     pub runtime_offsets: crate::dwarf::RuntimeOffsets,
 }
 
 pub fn plan_instrumentation(
     proc: &proc::Proc,
     analysis: &symbol_analyzer::FunctionAnalysis,
-    _symbol_name: &str,
-    mut buffers: Vec<EventBuffer>,
+    buffer: &mut EventBuffer,
+    symbol_id: SymbolId,
     event_tx: Sender<TraceEvent>,
 ) -> Result<InstrumentationPlan, InstrumentError> {
     let exe_path = proc.exe_path()?;
@@ -36,31 +36,29 @@ pub fn plan_instrumentation(
         crate::error::DwarfError::NoDwarfInfo,
     ))?;
 
-    // buffers[0] = entry, buffers[1..] = ret命令（順に割り当て）
-    // child_buffer_addr は instrument フェーズで ptrace 経由の mmap により決定する
-    buffers[0].start_reader(event_tx.clone());
+    buffer.start_reader(event_tx);
 
+    let buffer_fd = buffer.fd();
     let mut targets = vec![InstrumentTarget {
         addr: analysis.entry_addr,
         builder: Box::new(instruction::EntryTrampolineBuilder()),
-        buffer_fd: buffers[0].fd(),
+        buffer_fd,
         event_type: 0,
+        symbol_id,
     }];
 
-    for (i, ret_addr) in analysis.ret_addrs.iter().enumerate() {
-        let buf_idx = 1 + i;
-        buffers[buf_idx].start_reader(event_tx.clone());
+    for ret_addr in &analysis.ret_addrs {
         targets.push(InstrumentTarget {
             addr: *ret_addr,
             builder: Box::new(instruction::EntryTrampolineBuilder()),
-            buffer_fd: buffers[buf_idx].fd(),
+            buffer_fd,
             event_type: 1,
+            symbol_id,
         });
     }
 
     Ok(InstrumentationPlan {
         targets,
-        buffers,
         runtime_offsets,
     })
 }
@@ -77,6 +75,7 @@ struct AllocatedTarget {
     child_buffer_addr: u64,
     builder: Box<dyn instruction::TrampolineBuilder>,
     event_type: u8,
+    symbol_id: SymbolId,
 }
 
 struct TrampolineAllocating {
@@ -236,6 +235,7 @@ impl TryFrom<TrampolineAllocating> for TrampolineAllocated {
                 child_buffer_addr,
                 builder: target.builder,
                 event_type: target.event_type,
+                symbol_id: target.symbol_id,
             });
         }
 
@@ -272,6 +272,7 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
                 inst3,
                 inst4,
                 target.event_type,
+                target.symbol_id,
                 runtime_offsets,
             );
             tracee.write_instructions(target.trampoline_addr, trampoline)?;

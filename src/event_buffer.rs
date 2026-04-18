@@ -14,8 +14,8 @@ use nix::unistd::ftruncate;
 use crate::error::EventBufferError;
 use crate::event::TraceEvent;
 
-const BUFFER_SIZE: usize = 4096;
-pub const BUFFER_CAPACITY: u64 = 128;
+const BUFFER_SIZE: usize = 16384;
+pub const BUFFER_CAPACITY: u64 = 512;
 const BUFFER_HEADER_SIZE: usize = 64;
 const TRACE_EVENT_SIZE: usize = 24;
 
@@ -62,6 +62,9 @@ impl EventBuffer {
     }
 
     pub fn start_reader(&mut self, tx: Sender<TraceEvent>) {
+        if self.reader.is_some() {
+            return;
+        }
         let ptr_addr = self.ptr.as_ptr() as usize;
         let stop = Arc::clone(&self.stop);
 

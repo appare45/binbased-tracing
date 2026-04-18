@@ -47,47 +47,56 @@ compile_error!("This crate only supports aarch64 architecture");
 
 #[cfg(target_arch = "aarch64")]
 fn main() {
+    use std::collections::HashMap;
     use std::sync::mpsc::channel;
+    use event::{SymbolId, SymbolInfo};
 
-    let (c, proc, is_child, config, pre_buffers) = setup_process().expect("Failed to setup process");
+    let (c, proc, is_child, config, mut buffer) = setup_process().expect("Failed to setup process");
 
     let (event_tx, event_rx) = channel();
 
     let mut all_targets = Vec::new();
-    let mut all_buffers = Vec::new();
     let mut runtime_offsets = None;
+    let mut symbol_map: HashMap<SymbolId, SymbolInfo> = HashMap::new();
 
-    for (target_symbol, buffers) in config.targets.iter().zip(pre_buffers.into_iter()) {
+    for (idx, target_symbol) in config.targets.iter().enumerate() {
+        let symbol_id = SymbolId(idx as u16);
         let analysis = symbol_analyzer::analyze_function(&proc, target_symbol)
             .expect("Failed to analyze symbol");
 
-        let plan = instrument::plan_instrumentation(&proc, &analysis, target_symbol, buffers, event_tx.clone())
-            .expect("Failed to plan instrumentation");
+        let plan = instrument::plan_instrumentation(
+            &proc,
+            &analysis,
+            &mut buffer,
+            symbol_id,
+            event_tx.clone(),
+        )
+        .expect("Failed to plan instrumentation");
 
         all_targets.extend(plan.targets);
-        all_buffers.extend(plan.buffers);
 
         if runtime_offsets.is_none() {
             runtime_offsets = Some(plan.runtime_offsets);
         }
+
+        symbol_map.insert(symbol_id, SymbolInfo { name: target_symbol.clone() });
     }
 
     let inst = instrument::new(proc, all_targets, runtime_offsets.unwrap())
         .expect("Failed to create instrument");
     let proc = inst.instrument().expect("Failed to instrument");
 
-    monitor::monitor_process(&proc, is_child, all_buffers, event_rx)
+    monitor::monitor_process(&proc, is_child, buffer, event_rx, symbol_map)
         .expect("Failed to monitor process");
 
     drop(c);
 }
 
 fn setup_process() -> Result<
-    (conf::Conf, proc::Proc, bool, config::Config, Vec<Vec<event_buffer::EventBuffer>>),
+    (conf::Conf, proc::Proc, bool, config::Config, event_buffer::EventBuffer),
     Box<dyn std::error::Error>,
 > {
     use event_buffer::EventBuffer;
-    use std::path::PathBuf;
 
     let cli = Cli::parse();
 
@@ -98,30 +107,14 @@ fn setup_process() -> Result<
             );
             println!("Attached to process with PID: {}", pid);
             let config = config::load(&config)?;
-            // attach の場合は spawn 前バッファ作成不可なので spawn 後に作成（将来対応）
             let c = conf::new(nix::unistd::Pid::from_raw(pid), false);
             let proc = c.trace()?;
-            let mut pre_buffers: Vec<Vec<EventBuffer>> = Vec::new();
-            for _ in &config.targets {
-                pre_buffers.push(vec![EventBuffer::create()?]);
-            }
-            Ok((c, proc, false, config, pre_buffers))
+            let buffer = EventBuffer::create()?;
+            Ok((c, proc, false, config, buffer))
         }
         Commands::Exec { path, args, config } => {
-            let exe_path = PathBuf::from(&path);
             let config = config::load(&config)?;
-
-            // spawn前にバッファを作成（memfdをfork前に確保してfdを子に引き継ぐ）
-            let mut pre_buffers: Vec<Vec<EventBuffer>> = Vec::new();
-            for target_symbol in &config.targets {
-                let n = symbol_analyzer::count_buffers_needed(&exe_path, target_symbol)
-                    .unwrap_or(1);
-                let mut bufs = Vec::new();
-                for _ in 0..n {
-                    bufs.push(EventBuffer::create()?);
-                }
-                pre_buffers.push(bufs);
-            }
+            let buffer = EventBuffer::create()?;
 
             let mut command = Command::new(path);
             for arg in args {
@@ -137,7 +130,7 @@ fn setup_process() -> Result<
 
             let c = conf::new(nix::unistd::Pid::from_raw(pid as i32), true);
             let proc = c.trace()?;
-            Ok((c, proc, true, config, pre_buffers))
+            Ok((c, proc, true, config, buffer))
         }
     }
 }

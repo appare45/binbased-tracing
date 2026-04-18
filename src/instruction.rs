@@ -268,6 +268,7 @@ pub trait TrampolineBuilder {
         inst3: u32,
         inst4: u32,
         event_type: u8,
+        symbol_id: crate::event::SymbolId,
         runtime_offsets: &crate::dwarf::RuntimeOffsets,
     ) -> Instructions;
 }
@@ -284,6 +285,7 @@ impl TrampolineBuilder for EntryTrampolineBuilder {
         inst3: u32,
         inst4: u32,
         event_type: u8,
+        symbol_id: crate::event::SymbolId,
         runtime_offsets: &crate::dwarf::RuntimeOffsets,
     ) -> Instructions {
         let mut instructions = Instructions::new();
@@ -292,10 +294,11 @@ impl TrampolineBuilder for EntryTrampolineBuilder {
         // スタック確保: sub sp, sp, #32 (24バイト構造体 + 8バイトアライメント)
         instructions.push(0xd10083ff); // sub sp, sp, #32
 
-        // event_type (1バイト) + padding (7バイト) を [sp] に書き込み
-        // x0にevent_typeを設定し、8バイト書き込み（残り7バイトは自動的に0）
-        instructions.push(build_movz(0, event_type as u32, 0));
-        instructions.push(0xf90003e0); // str x0, [sp] - 8バイト書き込み
+        // event_type(1B) + padding(5B) + symbol_id(2B) を8バイトとして [sp] に書き込む
+        // x0 = event_type | (symbol_id << 48)
+        let header_val: u64 = (event_type as u64) | ((symbol_id.0 as u64) << 48);
+        instructions.join(build_large_mov(0, header_val));
+        instructions.push(0xf90003e0); // str x0, [sp]
 
         // x28（goroutineポインタ）からgoidを読み取り、x0に格納後、[sp+8]に保存
         // x28はAArch64のGo runtimeでgoroutineポインタとして使用される
