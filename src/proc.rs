@@ -66,8 +66,11 @@ impl Proc {
         maps::find_free_region(&mut self.regions, hint, size)
     }
 
-    pub fn wait_for_status(&self) -> Result<wait::WaitStatus, ProcError> {
-        wait::waitpid(self.pid, None).map_err(ProcError::FailedToWaitPid)
+    pub fn try_wait(&self) -> Option<wait::WaitStatus> {
+        match wait::waitpid(self.pid, Some(wait::WaitPidFlag::WNOHANG)) {
+            Ok(s @ wait::WaitStatus::Exited(_, _)) | Ok(s @ wait::WaitStatus::Signaled(_, _, _)) => Some(s),
+            _ => None,
+        }
     }
 
     pub fn exe_path(&self) -> Result<PathBuf, ProcError> {

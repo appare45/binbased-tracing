@@ -25,6 +25,10 @@ impl TargetRegistry {
         id
     }
 
+    pub fn contains(&self, name: &str) -> bool {
+        self.inner.values().any(|t| t.name == name)
+    }
+
     pub fn name(&self, id: TargetId) -> &str {
         self.inner.get(&id).map(|t| t.name.as_str()).unwrap_or("<unknown>")
     }

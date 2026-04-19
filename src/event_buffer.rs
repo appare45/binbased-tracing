@@ -29,9 +29,10 @@ pub struct EventBuffer {
 }
 
 unsafe impl Send for EventBuffer {}
+unsafe impl Sync for EventBuffer {}
 
 impl EventBuffer {
-    pub fn create() -> Result<(Self, EventReceiver), EventBufferError> {
+    pub fn create() -> Result<Self, EventBufferError> {
         // O_CLOEXEC なしで作成し、子プロセスに fd を引き継ぐ
         let fd = memfd_create(c"tracer_shm", MFdFlags::empty()).map_err(EventBufferError::MemfdCreateFailed)?;
 
@@ -51,15 +52,18 @@ impl EventBuffer {
 
         unsafe { ptr::write_volatile(ptr.cast().as_ptr(), 0u64) };
 
-        let (tx, rx) = mpsc::channel();
-        let mut buffer = Self {
+        Ok(Self {
             ptr: ptr.cast(),
             fd,
             stop: Arc::new(AtomicBool::new(false)),
             reader: None,
-        };
-        buffer.start_reader(tx);
-        Ok((buffer, rx))
+        })
+    }
+
+    pub fn take_receiver(&mut self) -> EventReceiver {
+        let (tx, rx) = mpsc::channel();
+        self.start_reader(tx);
+        rx
     }
 
     pub fn fd(&self) -> RawFd {

@@ -1,5 +1,6 @@
 use crate::event::{EventType, TargetId, TargetRegistry, TraceEvent};
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone)]
 pub struct EntryData {
@@ -8,12 +9,12 @@ pub struct EntryData {
 
 pub struct TraceCollector {
     pending_entries: HashMap<(u64, TargetId), EntryData>,
-    registry: TargetRegistry,
+    registry: Arc<RwLock<TargetRegistry>>,
     orphaned_returns: u64,
 }
 
 impl TraceCollector {
-    pub fn new(registry: TargetRegistry) -> Self {
+    pub fn new(registry: Arc<RwLock<TargetRegistry>>) -> Self {
         Self {
             pending_entries: HashMap::new(),
             registry,
@@ -25,7 +26,7 @@ impl TraceCollector {
         let goroutine_id = event.goroutine;
         let timestamp = event.timestamp;
         let target_id = event.target_id;
-        let name = self.registry.name(target_id).to_owned();
+        let name = self.registry.read().unwrap().name(target_id).to_owned();
 
         match event.event_type {
             EventType::Entry => {
