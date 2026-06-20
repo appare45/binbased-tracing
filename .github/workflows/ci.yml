@@ -11,10 +11,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.0
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Set up Rust toolchain extras
+        run: |
+          rustup component add rustfmt clippy llvm-tools-preview
+          rustup target add aarch64-unknown-none
+          cargo install cargo-binutils --locked
 
       - name: Cache cargo registry and target
         uses: actions/cache@v5.0.5
