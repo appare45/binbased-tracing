@@ -1,4 +1,4 @@
-mod encode;
+mod blob;
 mod patch;
 mod trampoline;
 

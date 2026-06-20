@@ -1,14 +1,4 @@
-[package]
-name = "binbased-tracing"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-clap = { version = "4.5.54", features = ["derive"] }
-gimli = "0.31"
-goblin = "0.10.4"
-nix = { version = "0.31.2", features = ["fs", "mman", "process", "ptrace", "signal"] }
-object = "0.36"
-thiserror = "2.0.17"
-serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
+[workspace]
+members = ["binbased-tracing", "trampoline-blob-common"]
+exclude = ["trampoline-blob"]
+resolver = "2"
