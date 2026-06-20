@@ -11,22 +11,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.0
 
-      - name: Set up Rust toolchain extras
-        run: |
-          rustup component add rustfmt clippy llvm-tools-preview
-          rustup target add aarch64-unknown-none
-          cargo install cargo-binutils --locked
-
-      - name: Cache cargo registry and target
+      - name: Cache rustup toolchain and cargo registry/target
+        id: rust-cache
         uses: actions/cache@v5.0.5
         with:
           path: |
+            ~/.rustup
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin
             target
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             cargo-${{ runner.os }}-
+
+      - name: Set up Rust toolchain extras
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        run: |
+          rustup component add rustfmt clippy llvm-tools-preview
+          rustup target add aarch64-unknown-none
+          cargo install cargo-binutils --locked
 
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
@@ -44,6 +48,7 @@ jobs:
         uses: actions/setup-go@v6.4.0
         with:
           go-version-file: demo/go.mod
+          cache: false
 
       - name: Cache demo binary
         id: demo-cache
