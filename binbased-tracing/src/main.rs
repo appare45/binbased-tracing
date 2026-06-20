@@ -1,12 +1,12 @@
-use std::fs;
-use std::sync::{Arc, RwLock};
-use std::time::SystemTime;
 use binbased_tracing::{config, event, event_buffer, instrument, monitor, proc};
 use clap::Parser;
 use clap::Subcommand;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
+use std::sync::{Arc, RwLock};
+use std::time::SystemTime;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -19,13 +19,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Attach {
-        pid: i32,
-    },
-    Exec {
-        path: String,
-        args: Vec<String>,
-    },
+    Attach { pid: i32 },
+    Exec { path: String, args: Vec<String> },
 }
 
 #[cfg(not(target_arch = "aarch64"))]
@@ -39,16 +34,15 @@ fn main() {
     let event_rx = buffer.take_receiver();
     let buffer = Arc::new(buffer);
 
-    let mut inst = Some(instrument::Instrumenter::new(proc).expect("Failed to create instrumenter"));
+    let mut inst =
+        Some(instrument::Instrumenter::new(proc).expect("Failed to create instrumenter"));
     let registry = Arc::new(RwLock::new(event::TargetRegistry::new()));
 
     let done_rx = monitor::start(event_rx, Arc::clone(&registry));
 
     let mut last_mtime: Option<SystemTime> = None;
     loop {
-        let mtime = fs::metadata(&config_path)
-            .and_then(|m| m.modified())
-            .ok();
+        let mtime = fs::metadata(&config_path).and_then(|m| m.modified()).ok();
 
         if mtime != last_mtime {
             last_mtime = mtime;
@@ -58,7 +52,9 @@ fn main() {
                         if registry.read().unwrap().contains(&target.name) {
                             continue;
                         }
-                        let Some(current_inst) = inst.take() else { break };
+                        let Some(current_inst) = inst.take() else {
+                            break;
+                        };
                         match target.analyze(&current_inst.proc) {
                             Ok(analysis) => {
                                 let id = registry.write().unwrap().add(target.name.clone());
@@ -96,10 +92,9 @@ fn main() {
     let _ = done_rx.recv();
 }
 
-fn setup_process(cli: Cli) -> Result<
-    (proc::Proc, event_buffer::EventBuffer),
-    Box<dyn std::error::Error>,
-> {
+fn setup_process(
+    cli: Cli,
+) -> Result<(proc::Proc, event_buffer::EventBuffer), Box<dyn std::error::Error>> {
     let buffer = event_buffer::EventBuffer::create()?;
 
     match cli.command {

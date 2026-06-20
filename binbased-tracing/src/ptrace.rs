@@ -54,7 +54,7 @@ impl Stopped {
             return Ok(instruction::Instructions::new());
         }
 
-        let num_words = (len + 1) / 2; // 奇数命令数でも切り上げ
+        let num_words = len.div_ceil(2); // 奇数命令数でも切り上げ
         let mut saved = Vec::with_capacity(num_words);
 
         for i in 0..num_words {
@@ -75,7 +75,6 @@ impl Stopped {
 
         Ok(saved.into())
     }
-
 }
 
 impl TryFrom<Stopped> for Attached {

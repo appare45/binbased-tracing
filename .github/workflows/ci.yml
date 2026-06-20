@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --release
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      - name: Set up Go
+        uses: actions/setup-go@v6.4.0
+        with:
+          go-version-file: demo/go.mod
+
+      - name: Cache demo binary
+        id: demo-cache
+        uses: actions/cache@v5.0.5
+        with:
+          path: demo/demo
+          key: demo-bin-${{ runner.os }}-${{ hashFiles('demo/**/*.go', 'demo/go.mod', 'demo/go.sum') }}
+
+      - name: Build demo
+        if: steps.demo-cache.outputs.cache-hit != 'true'
+        working-directory: demo
+        run: go build -o demo .
+
+      - name: Run tracer against demo and verify events
+        run: |
+          set -x
+          pkill -9 demo binbased-tracing 2>/dev/null || true
+
+          sudo target/release/binbased-tracing exec ./demo/demo > /tmp/tracing.log 2>&1 &
+
+          for i in $(seq 1 10); do
+            curl -s --connect-timeout 1 http://localhost:8080/ > /dev/null 2>&1 && break
+            sleep 1
+          done
+
+          curl -s http://localhost:8080/ > /dev/null
+          curl -s http://localhost:8080/health > /dev/null
+          sleep 0.5
+
+          sudo pkill -15 -f "demo|binbased-tracing" 2>/dev/null || true
+          sleep 1
+          sudo pkill -9 -f "demo|binbased-tracing" 2>/dev/null || true
+
+          cat /tmp/tracing.log
+
+          entries=$(grep -c "ENTRY" /tmp/tracing.log || true)
+          returns=$(grep -c "RETURN" /tmp/tracing.log || true)
+          echo "entries=$entries returns=$returns"
+
+          if [ "$entries" -eq 0 ] || [ "$entries" != "$returns" ]; then
+            echo "Tracing verification failed: entries=$entries returns=$returns"
+            exit 1
+          fi
