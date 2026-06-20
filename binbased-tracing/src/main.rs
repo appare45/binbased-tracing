@@ -11,7 +11,7 @@ use std::process::Stdio;
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    #[arg(short, long, default_value = "trace.toml")]
+    #[arg(short, long, default_value = "trace.yaml")]
     config: PathBuf,
     #[command(subcommand)]
     command: Commands,

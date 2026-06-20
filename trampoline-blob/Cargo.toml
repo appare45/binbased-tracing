@@ -1,0 +1,15 @@
+[package]
+name = "trampoline-blob"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+trampoline-blob-common = { path = "../trampoline-blob-common" }
+
+# parent workspaceからexclude済みなので、ここが独立したworkspace rootとして
+# profile設定を正規に適用できる。
+[profile.release]
+opt-level = 1
+lto = false
+debug = false
+strip = false

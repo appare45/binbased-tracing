@@ -40,7 +40,7 @@ impl TraceCollector {
                 }
 
                 println!(
-                    "[Entry] target='{}' goroutine=0x{:x} timestamp={}",
+                    "→ ENTRY  {:>60}  goroutine=0x{:x}  ts={}",
                     name, goroutine_id, timestamp
                 );
             }
@@ -49,8 +49,8 @@ impl TraceCollector {
                     let duration = timestamp.saturating_sub(entry.timestamp);
 
                     println!(
-                        "[Completed] target='{}' goroutine=0x{:x}: entry={}, return={}, duration={} cycles",
-                        name, goroutine_id, entry.timestamp, timestamp, duration
+                        "✓ RETURN {:>60}  goroutine=0x{:x}  {} cycles",
+                        name, goroutine_id, duration
                     );
                 } else {
                     self.orphaned_returns += 1;

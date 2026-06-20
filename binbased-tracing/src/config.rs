@@ -14,27 +14,38 @@ impl Target {
     }
 }
 
-impl<'de> Deserialize<'de> for Target {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let name = String::deserialize(d)?;
-        Ok(Target { name })
-    }
-}
-
 #[derive(Debug, Deserialize)]
-pub struct Config {
-    pub targets: Vec<Target>,
+struct RawConfig {
+    targets: Vec<serde_yaml::Value>,
 }
 
 pub fn load(path: &Path) -> Result<Config, ConfigError> {
     let content = std::fs::read_to_string(path)?;
-    let config: Config = toml::from_str(&content)?;
+    let raw: RawConfig = serde_yaml::from_str(&content)?;
 
-    if config.targets.is_empty() {
+    let targets: Vec<Target> = raw.targets.into_iter().map(|v| {
+        let name = match &v {
+            serde_yaml::Value::String(s) => s.clone(),
+            serde_yaml::Value::Mapping(m) => m.keys()
+                .next()
+                .and_then(|k| k.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            _ => String::new(),
+        };
+        Target { name }
+    }).collect();
+
+    if targets.is_empty() {
         return Err(ConfigError::NoTargets);
     }
 
-    Ok(config)
+    Ok(Config { targets })
+}
+
+#[derive(Debug)]
+pub struct Config {
+    pub targets: Vec<Target>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -43,7 +54,7 @@ pub enum ConfigError {
     Io(#[from] std::io::Error),
 
     #[error("設定ファイルのパースに失敗: {0}")]
-    Parse(#[from] toml::de::Error),
+    Parse(#[from] serde_yaml::Error),
 
     #[error("計装対象が指定されていません")]
     NoTargets,
