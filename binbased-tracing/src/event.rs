@@ -13,9 +13,18 @@ pub struct TargetRegistry {
     next_id: u16,
 }
 
+impl Default for TargetRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TargetRegistry {
     pub fn new() -> Self {
-        Self { inner: HashMap::new(), next_id: 0 }
+        Self {
+            inner: HashMap::new(),
+            next_id: 0,
+        }
     }
 
     pub fn add(&mut self, name: String) -> TargetId {
@@ -30,7 +39,10 @@ impl TargetRegistry {
     }
 
     pub fn name(&self, id: TargetId) -> &str {
-        self.inner.get(&id).map(|t| t.name.as_str()).unwrap_or("<unknown>")
+        self.inner
+            .get(&id)
+            .map(|t| t.name.as_str())
+            .unwrap_or("<unknown>")
     }
 }
 

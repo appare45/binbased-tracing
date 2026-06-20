@@ -29,7 +29,10 @@ fn main() {
             .args(args)
             .status()
             .unwrap_or_else(|e| panic!("failed to spawn cargo {args:?}: {e}"));
-        assert!(status.success(), "cargo {args:?} failed for trampoline-blob");
+        assert!(
+            status.success(),
+            "cargo {args:?} failed for trampoline-blob"
+        );
     };
 
     run(&["build", "--release"]);

@@ -40,7 +40,11 @@ pub fn new(file: &[u8]) -> Result<ELF, ElfError> {
             // Try to load DWARF information (failure is not fatal)
             let runtime_offsets = dwarf::RuntimeOffsets::from_elf(file).ok();
 
-            Ok(ELF { funcs, load_base, runtime_offsets })
+            Ok(ELF {
+                funcs,
+                load_base,
+                runtime_offsets,
+            })
         }
         _ => Err(ElfError::NotAnElfFile),
     }

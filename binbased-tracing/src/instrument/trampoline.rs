@@ -1,8 +1,7 @@
 use crate::{
     error::InstrumentError,
     instruction::{self, BranchStrategy},
-    proc,
-    ptrace,
+    proc, ptrace,
 };
 
 use super::plan::{AllocatedTarget, InstrumentTarget, TRAMPOLINE_SIZE};
@@ -56,7 +55,7 @@ impl NotInstrumented {
         let wrote = TrampolineWrote::try_from(writing)?;
         let perm_changing = TrampolinePermissionChanging::try_from(wrote)?;
         let perm_changed = TrampolinePermissionChanged::try_from(perm_changing)?;
-        Ok(proc::Proc::try_from(perm_changed)?)
+        proc::Proc::try_from(perm_changed)
     }
 }
 
@@ -79,7 +78,7 @@ fn call_svc(
 ) -> Result<(ptrace::Attached, u64), InstrumentError> {
     let saved_regs = tracee.get_regs()?;
     let pc = saved_regs.pc;
-    let mut regs = saved_regs.clone();
+    let mut regs = saved_regs;
 
     for (i, v) in params.iter().enumerate() {
         if regs.regs.len() <= i {
@@ -97,7 +96,10 @@ fn call_svc(
     let addr = result_regs.regs[0];
 
     if (addr as i64) < 0 {
-        eprintln!("syscall failed! Return value: 0x{:x} ({})", addr, addr as i64);
+        eprintln!(
+            "syscall failed! Return value: 0x{:x} ({})",
+            addr, addr as i64
+        );
         return Err(InstrumentError::SyscallFailed(addr));
     }
 
@@ -168,25 +170,22 @@ impl TryFrom<TrampolineAllocated> for TrampolineWriting {
             let patch_addr = target.patch.patch_addr();
             let target_bin1 = instruction::Instructions::from(tracee.read(patch_addr)?);
             let target_bin2 = instruction::Instructions::from(tracee.read(patch_addr + 8)?);
-            let inst1 = target_bin1.get(0).unwrap();
-            let inst2 = target_bin1.get(1).unwrap();
-            let inst3 = target_bin2.get(0).unwrap();
-            let inst4 = target_bin2.get(1).unwrap();
+            let replaced_insts = [
+                target_bin1.get(0).unwrap(),
+                target_bin1.get(1).unwrap(),
+                target_bin2.get(0).unwrap(),
+                target_bin2.get(1).unwrap(),
+            ];
 
-            let trampoline = instruction::build_trampoline(
-                &target.patch,
-                target.child_buffer_addr,
-                patch_addr,
-                target.trampoline_addr,
-                inst1, inst2, inst3, inst4,
-                target.event_type,
-                target.target_id,
-                runtime_offsets,
-            );
+            let trampoline =
+                instruction::build_trampoline(target, patch_addr, replaced_insts, runtime_offsets);
             tracee.write_instructions(target.trampoline_addr, trampoline)?;
         }
 
-        Ok(TrampolineWriting { tracee, targets: value.targets })
+        Ok(TrampolineWriting {
+            tracee,
+            targets: value.targets,
+        })
     }
 }
 

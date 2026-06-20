@@ -4,7 +4,10 @@ use std::{
     path::PathBuf,
 };
 
-use nix::{sys::{signal, wait}, unistd};
+use nix::{
+    sys::{signal, wait},
+    unistd,
+};
 
 use crate::{elf, error::ProcError, maps};
 
@@ -17,10 +20,13 @@ pub struct Proc {
     kill_on_drop: bool,
 }
 
-
 pub fn new(pid: unistd::Pid, kill_on_drop: bool) -> Result<Proc, ProcError> {
     File::open(format!("/proc/{}/status", pid)).map_err(ProcError::FailedToGetStatus)?;
-    Ok(Proc { pid, regions: Vec::new(), kill_on_drop })
+    Ok(Proc {
+        pid,
+        regions: Vec::new(),
+        kill_on_drop,
+    })
 }
 
 impl Drop for Proc {
@@ -68,14 +74,14 @@ impl Proc {
 
     pub fn try_wait(&self) -> Option<wait::WaitStatus> {
         match wait::waitpid(self.pid, Some(wait::WaitPidFlag::WNOHANG)) {
-            Ok(s @ wait::WaitStatus::Exited(_, _)) | Ok(s @ wait::WaitStatus::Signaled(_, _, _)) => Some(s),
+            Ok(s @ wait::WaitStatus::Exited(_, _))
+            | Ok(s @ wait::WaitStatus::Signaled(_, _, _)) => Some(s),
             _ => None,
         }
     }
 
     pub fn exe_path(&self) -> Result<PathBuf, ProcError> {
-        std::fs::read_link(format!("/proc/{}/exe", self.pid))
-            .map_err(|e| ProcError::IoError(e))
+        std::fs::read_link(format!("/proc/{}/exe", self.pid)).map_err(ProcError::IoError)
     }
 }
 

@@ -1,18 +1,30 @@
 use super::Instructions;
 
 pub enum BranchStrategy {
-    Branch { patch_addr: u64, trampoline_addr: u64 },
-    JumpToAbs { patch_addr: u64, trampoline_addr: u64 },
+    Branch {
+        patch_addr: u64,
+        trampoline_addr: u64,
+    },
+    JumpToAbs {
+        patch_addr: u64,
+        trampoline_addr: u64,
+    },
 }
 
 impl BranchStrategy {
     pub fn new(patch_addr: u64, trampoline_addr: u64) -> Self {
         let offset = (trampoline_addr as i64) - (patch_addr as i64);
         let offset_insns = offset / 4;
-        if offset % 4 == 0 && offset_insns >= -(1 << 25) && offset_insns < (1 << 25) {
-            BranchStrategy::Branch { patch_addr, trampoline_addr }
+        if offset % 4 == 0 && (-(1 << 25)..(1 << 25)).contains(&offset_insns) {
+            BranchStrategy::Branch {
+                patch_addr,
+                trampoline_addr,
+            }
         } else {
-            BranchStrategy::JumpToAbs { patch_addr, trampoline_addr }
+            BranchStrategy::JumpToAbs {
+                patch_addr,
+                trampoline_addr,
+            }
         }
     }
 
@@ -26,7 +38,10 @@ impl BranchStrategy {
     pub fn apply(&self) -> (Instructions, u64) {
         let patch_addr = self.patch_addr();
         let instructions = match self {
-            BranchStrategy::Branch { patch_addr, trampoline_addr } => {
+            BranchStrategy::Branch {
+                patch_addr,
+                trampoline_addr,
+            } => {
                 let offset = (*trampoline_addr as i64) - (*patch_addr as i64);
                 let offset_insns = offset / 4;
                 let mut instructions = Instructions::new();
@@ -34,7 +49,9 @@ impl BranchStrategy {
                 instructions.push(0x1400_0000 | imm26);
                 instructions
             }
-            BranchStrategy::JumpToAbs { trampoline_addr, .. } => {
+            BranchStrategy::JumpToAbs {
+                trampoline_addr, ..
+            } => {
                 let mut instructions = Instructions::new();
                 instructions.push(0x58000050u32); // ldr x16, #8
                 instructions.push(0xd61f0200u32); // br x16
@@ -50,37 +67,36 @@ impl BranchStrategy {
         &self,
         replaced_addr: u64,
         epilogue_addr: u64,
-        inst1: u32,
-        inst2: u32,
-        inst3: u32,
-        inst4: u32,
+        insts: [u32; 4],
     ) -> Instructions {
         let mut instructions = Instructions::new();
         match self {
             BranchStrategy::Branch { patch_addr, .. } => {
-                if inst1 == 0xd65f03c0 {
+                if insts[0] == 0xd65f03c0 {
                     instructions.push(0xd65f03c0); // ret
                 } else {
-                    instructions.join(relocate_instruction(inst1));
+                    instructions.join(relocate_instruction(insts[0]));
                     let b_addr = epilogue_addr + instructions.len() as u64 * 4;
                     instructions.join(BranchStrategy::new(b_addr, *patch_addr + 4).apply().0);
                 }
             }
             BranchStrategy::JumpToAbs { .. } => {
-                let insts = [inst1, inst2, inst3, inst4];
                 for &inst in insts.iter() {
                     instructions.join(relocate_instruction(inst));
                 }
-                instructions.join(BranchStrategy::JumpToAbs {
-                    patch_addr: 0,
-                    trampoline_addr: replaced_addr + 16,
-                }.apply().0);
+                instructions.join(
+                    BranchStrategy::JumpToAbs {
+                        patch_addr: 0,
+                        trampoline_addr: replaced_addr + 16,
+                    }
+                    .apply()
+                    .0,
+                );
             }
         }
         instructions
     }
 }
-
 
 fn relocate_instruction(inst: u32) -> Instructions {
     let mut instructions = Instructions::new();

@@ -1,17 +1,11 @@
+pub mod plan;
 mod trampoline;
-mod plan;
 
 use plan::plan_instrumentation;
 
 use std::sync::Arc;
 
-use crate::{
-    error::InstrumentError,
-    event::TargetId,
-    event_buffer::EventBuffer,
-    proc,
-    ptrace,
-};
+use crate::{error::InstrumentError, event::TargetId, event_buffer::EventBuffer, proc, ptrace};
 
 pub use crate::symbol_analyzer::FunctionAnalysis;
 
@@ -31,13 +25,13 @@ impl Instrumenter {
         })
     }
 
-    pub fn add_target(mut self, analysis: &FunctionAnalysis, buffer: Arc<EventBuffer>, target_id: TargetId) -> Result<Self, InstrumentError> {
-        let plan = plan_instrumentation(
-            &mut self.proc,
-            analysis,
-            buffer,
-            target_id,
-        )?;
+    pub fn add_target(
+        mut self,
+        analysis: &FunctionAnalysis,
+        buffer: Arc<EventBuffer>,
+        target_id: TargetId,
+    ) -> Result<Self, InstrumentError> {
+        let plan = plan_instrumentation(&mut self.proc, analysis, buffer, target_id)?;
         let runtime_offsets = if let Some(ref o) = self.runtime_offsets {
             o.clone()
         } else {

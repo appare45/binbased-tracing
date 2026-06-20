@@ -1,10 +1,6 @@
 use crate::{
-    error::InstrumentError,
-    event::TargetId,
-    event_buffer::EventBuffer,
-    instruction::BranchStrategy,
-    proc,
-    symbol_analyzer::FunctionAnalysis,
+    error::InstrumentError, event::TargetId, event_buffer::EventBuffer,
+    instruction::BranchStrategy, proc, symbol_analyzer::FunctionAnalysis,
 };
 use std::sync::Arc;
 pub const TRAMPOLINE_SIZE: u64 = 1024;

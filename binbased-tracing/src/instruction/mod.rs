@@ -8,6 +8,12 @@ pub use trampoline::build_trampoline;
 #[derive(Clone)]
 pub struct Instructions(Vec<u32>);
 
+impl Default for Instructions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Instructions {
     pub fn new() -> Self {
         Instructions(Vec::new())
@@ -28,11 +34,15 @@ impl Instructions {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
-impl Into<Vec<i64>> for Instructions {
-    fn into(self) -> Vec<i64> {
-        self.0
+impl From<Instructions> for Vec<i64> {
+    fn from(val: Instructions) -> Self {
+        val.0
             .chunks_exact(2)
             .map(|chunk| {
                 let low = chunk[0] as i64;

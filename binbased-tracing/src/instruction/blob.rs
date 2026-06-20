@@ -14,7 +14,11 @@ fn blob_words() -> Vec<u32> {
         .chunks_exact(4)
         .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect();
-    assert_eq!(words.pop(), Some(RET_INSTRUCTION), "trampoline blob must end with ret");
+    assert_eq!(
+        words.pop(),
+        Some(RET_INSTRUCTION),
+        "trampoline blob must end with ret"
+    );
     words
 }
 
@@ -29,7 +33,11 @@ fn patch_magic_chunks(words: &mut [u32], magics: &[u16; 4], value: u64) {
     }
 }
 
-pub fn build_trampoline_from_blob(header_val: u64, goid_offset: u64, buffer_addr: u64) -> Instructions {
+pub fn build_trampoline_from_blob(
+    header_val: u64,
+    goid_offset: u64,
+    buffer_addr: u64,
+) -> Instructions {
     let mut words = blob_words();
     // TODO: 構造体にしたい
     patch_magic_chunks(&mut words, &MAGIC_HEADER_VAL, header_val);

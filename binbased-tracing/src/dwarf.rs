@@ -14,8 +14,7 @@ pub struct RuntimeOffsets {
 
 impl RuntimeOffsets {
     pub fn from_elf(elf_bytes: &[u8]) -> Result<Self, DwarfError> {
-        let object_file = object::File::parse(elf_bytes)
-            .map_err(|_| DwarfError::NoDwarfInfo)?;
+        let object_file = object::File::parse(elf_bytes).map_err(|_| DwarfError::NoDwarfInfo)?;
 
         // Load DWARF sections - need to own the data
         let endian = if object_file.is_little_endian() {
@@ -47,12 +46,18 @@ impl RuntimeOffsets {
             debug_info: gimli::DebugInfo::new(&debug_info, endian),
             debug_str: gimli::DebugStr::new(&debug_str, endian),
             debug_line: gimli::DebugLine::new(&debug_line, endian),
-            debug_str_offsets: gimli::DebugStrOffsets::from(EndianSlice::new(&debug_str_offsets, endian)),
+            debug_str_offsets: gimli::DebugStrOffsets::from(EndianSlice::new(
+                &debug_str_offsets,
+                endian,
+            )),
             debug_addr: gimli::DebugAddr::from(EndianSlice::new(&debug_addr, endian)),
-            ranges: gimli::RangeLists::new(gimli::DebugRanges::new(&[], endian), gimli::DebugRngLists::new(&debug_rnglists, endian)),
+            ranges: gimli::RangeLists::new(
+                gimli::DebugRanges::new(&[], endian),
+                gimli::DebugRngLists::new(&debug_rnglists, endian),
+            ),
             locations: gimli::LocationLists::new(
                 gimli::DebugLoc::new(&[], endian),
-                gimli::DebugLocLists::new(&debug_loclists, endian)
+                gimli::DebugLocLists::new(&debug_loclists, endian),
             ),
             ..Default::default()
         };
@@ -79,7 +84,7 @@ fn find_field_offset(
     while let Some(header) = units.next()? {
         let unit = dwarf.unit(header)?;
 
-        if let Some(offset) = search_unit_for_field(&dwarf, &unit, struct_name, field_name)? {
+        if let Some(offset) = search_unit_for_field(dwarf, &unit, struct_name, field_name)? {
             return Ok(offset);
         }
     }
@@ -97,13 +102,12 @@ fn search_unit_for_field(
 
     while let Some((_, entry)) = entries.next_dfs()? {
         // Look for structure type with the specified name
-        if entry.tag() == gimli::DW_TAG_structure_type {
-            if let Some(name) = get_entry_name(dwarf, unit, entry)? {
-                if name == struct_name {
-                    // Found the struct, now find the field
-                    return find_struct_field_offset(dwarf, unit, entry, field_name);
-                }
-            }
+        if entry.tag() == gimli::DW_TAG_structure_type
+            && let Some(name) = get_entry_name(dwarf, unit, entry)?
+            && name == struct_name
+        {
+            // Found the struct, now find the field
+            return find_struct_field_offset(dwarf, unit, entry, field_name);
         }
     }
 
@@ -140,8 +144,8 @@ fn find_struct_field_offset(
     let mut depth = 0;
 
     // Get struct name for better error messages
-    let struct_name = get_entry_name(dwarf, unit, struct_entry)?
-        .unwrap_or_else(|| "unknown".to_string());
+    let struct_name =
+        get_entry_name(dwarf, unit, struct_entry)?.unwrap_or_else(|| "unknown".to_string());
 
     // Skip the struct entry itself
     if let Some((delta, _)) = entries.next_dfs()? {
@@ -158,22 +162,21 @@ fn find_struct_field_offset(
         }
 
         // Look for members with the specified field name
-        if entry.tag() == gimli::DW_TAG_member {
-            if let Some(name) = get_entry_name(dwarf, unit, entry)? {
-                if name == field_name {
-                    // Found the field, get its offset
-                    if let Some(attr) = entry.attr(gimli::DW_AT_data_member_location)? {
-                        let offset = match attr.value() {
-                            AttributeValue::Udata(offset) => offset,
-                            AttributeValue::Data1(offset) => offset as u64,
-                            AttributeValue::Data2(offset) => offset as u64,
-                            AttributeValue::Data4(offset) => offset as u64,
-                            AttributeValue::Data8(offset) => offset,
-                            _ => return Err(DwarfError::AttributeNotFound),
-                        };
-                        return Ok(Some(offset));
-                    }
-                }
+        if entry.tag() == gimli::DW_TAG_member
+            && let Some(name) = get_entry_name(dwarf, unit, entry)?
+            && name == field_name
+        {
+            // Found the field, get its offset
+            if let Some(attr) = entry.attr(gimli::DW_AT_data_member_location)? {
+                let offset = match attr.value() {
+                    AttributeValue::Udata(offset) => offset,
+                    AttributeValue::Data1(offset) => offset as u64,
+                    AttributeValue::Data2(offset) => offset as u64,
+                    AttributeValue::Data4(offset) => offset as u64,
+                    AttributeValue::Data8(offset) => offset,
+                    _ => return Err(DwarfError::AttributeNotFound),
+                };
+                return Ok(Some(offset));
             }
         }
     }
@@ -234,15 +237,18 @@ mod tests {
                 debug_info: gimli::DebugInfo::new(&debug_info, endian),
                 debug_str: gimli::DebugStr::new(&debug_str, endian),
                 debug_line: gimli::DebugLine::new(&debug_line, endian),
-                debug_str_offsets: gimli::DebugStrOffsets::from(EndianSlice::new(&debug_str_offsets, endian)),
+                debug_str_offsets: gimli::DebugStrOffsets::from(EndianSlice::new(
+                    &debug_str_offsets,
+                    endian,
+                )),
                 debug_addr: gimli::DebugAddr::from(EndianSlice::new(&debug_addr, endian)),
                 ranges: gimli::RangeLists::new(
                     gimli::DebugRanges::new(&[], endian),
-                    gimli::DebugRngLists::new(&debug_rnglists, endian)
+                    gimli::DebugRngLists::new(&debug_rnglists, endian),
                 ),
                 locations: gimli::LocationLists::new(
                     gimli::DebugLoc::new(&[], endian),
-                    gimli::DebugLocLists::new(&debug_loclists, endian)
+                    gimli::DebugLocLists::new(&debug_loclists, endian),
                 ),
                 ..Default::default()
             };

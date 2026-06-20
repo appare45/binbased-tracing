@@ -1,9 +1,9 @@
 use std::num::NonZeroUsize;
 use std::os::fd::{AsFd, AsRawFd, OwnedFd, RawFd};
 use std::ptr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -34,9 +34,11 @@ unsafe impl Sync for EventBuffer {}
 impl EventBuffer {
     pub fn create() -> Result<Self, EventBufferError> {
         // O_CLOEXEC なしで作成し、子プロセスに fd を引き継ぐ
-        let fd = memfd_create(c"tracer_shm", MFdFlags::empty()).map_err(EventBufferError::MemfdCreateFailed)?;
+        let fd = memfd_create(c"tracer_shm", MFdFlags::empty())
+            .map_err(EventBufferError::MemfdCreateFailed)?;
 
-        ftruncate(&fd, BUFFER_SIZE as nix::libc::off_t).map_err(EventBufferError::FtruncateFailed)?;
+        ftruncate(&fd, BUFFER_SIZE as nix::libc::off_t)
+            .map_err(EventBufferError::FtruncateFailed)?;
 
         let ptr = unsafe {
             mmap(

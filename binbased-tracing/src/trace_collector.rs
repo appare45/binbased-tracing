@@ -32,7 +32,10 @@ impl TraceCollector {
             EventType::Entry => {
                 let entry = EntryData { timestamp };
 
-                if let Some(old) = self.pending_entries.insert((goroutine_id, target_id), entry.clone()) {
+                if let Some(old) = self
+                    .pending_entries
+                    .insert((goroutine_id, target_id), entry.clone())
+                {
                     eprintln!(
                         "Warning: Goroutine {} target '{}' had pending entry at {}, overwriting with new entry at {}",
                         goroutine_id, name, old.timestamp, timestamp

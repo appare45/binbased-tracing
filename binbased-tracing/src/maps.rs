@@ -43,7 +43,7 @@ impl TryFrom<&str> for MemMap {
                         u64::from_str_radix(range.next().ok_or(MapsError::ParseError)?, 16)?,
                     )
                 },
-                _inode: u64::from_str_radix(parts[4], 10)?,
+                _inode: parts[4].parse::<u64>()?,
                 _pathname: if parts.len() >= 6 {
                     Some(parts[5].to_string())
                 } else {
@@ -77,7 +77,7 @@ pub fn find_free_region(regions: &mut Vec<(u64, u64)>, hint_addr: u64, size: u64
 pub fn parse_maps<R: BufRead>(reader: R) -> impl Iterator<Item = MemMap> {
     BufReader::new(reader)
         .lines()
-        .filter_map(|line| line.ok())
+        .map_while(Result::ok)
         .filter_map(|line| MemMap::try_from(line.as_str()).ok())
 }
 
