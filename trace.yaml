@@ -1,0 +1,7 @@
+targets:
+  - net/http.serverHandler.ServeHTTP:
+      data:
+        - goroutine
+  - main.(*Server).handleHealth:
+      data:
+        - goroutine
